@@ -1,0 +1,181 @@
+@page "/history"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@using SingleStepViewer.Data.Entities
+@using SingleStepViewer.Services.Interfaces
+@attribute [Authorize]
+@inject IPlaylistItemService PlaylistItemService
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>History - SingleStepViewer</PageTitle>
+
+<h1>Playback History</h1>
+
+<p>View and manage previously played videos.</p>
+
+@if (errorMessage != null)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (successMessage != null)
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (isLoading)
+{
+    <p>Loading history...</p>
+}
+else if (playedVideos == null || !playedVideos.Any())
+{
+    <div class="card">
+        <p>No videos have been played yet.</p>
+        <a href="/" class="btn btn-primary">Go to Queue</a>
+    </div>
+}
+else
+{
+    <div class="card">
+        <h3>Played Videos (@playedVideos.Count())</h3>
+        <div class="queue-list">
+            @foreach (var video in playedVideos)
+            {
+                <div class="queue-item card">
+                    <div class="queue-item-content">
+                        @if (!string.IsNullOrEmpty(video.ThumbnailUrl))
+                        {
+                            <img src="@video.ThumbnailUrl" alt="Thumbnail" class="queue-thumbnail" />
+                        }
+                        <div class="queue-info">
+                            <h4>@(video.Title ?? "Unknown Title")</h4>
+                            <p><strong>User:</strong> @video.Playlist?.User?.UserName</p>
+                            <p><strong>Playlist:</strong> @video.Playlist?.Name</p>
+                            @if (video.Duration.HasValue)
+                            {
+                                <p><strong>Duration:</strong> @video.Duration.Value.ToString(@"mm\:ss")</p>
+                            }
+                            <p><strong>Played:</strong> @video.UpdatedAt.ToLocalTime().ToString("g")</p>
+                        </div>
+                        <div class="queue-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Priority</span>
+                                <span class="stat-value priority-@video.Priority">@video.Priority</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Status</span>
+                                <span class="status-badge status-played">
+                                    Played
+                                </span>
+                            </div>
+                            <div class="playback-controls">
+                                <button class="btn btn-primary" @onclick="() => RequeueVideo(video.Id)" disabled="@isProcessing">
+                                    🔄 Re-queue
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<div class="card" style="margin-top: 1rem;">
+    <a href="/" class="btn btn-secondary">Back to Queue</a>
+    <a href="/playlists" class="btn btn-primary">Manage My Playlists</a>
+</div>
+
+@code {
+    private HubConnection? hubConnection;
+    private IEnumerable<PlaylistItem>? playedVideos;
+    private bool isLoading = true;
+    private bool isProcessing = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+
+        // Set up SignalR connection to auto-refresh when queue is updated
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/playbackHub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        hubConnection.On("QueueUpdated", async () =>
+        {
+            await LoadDataAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SignalR connection error: {ex.Message}");
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            isLoading = true;
+            playedVideos = await PlaylistItemService.GetPlayedVideosAsync(100);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RequeueVideo(int videoId)
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            var success = await PlaylistItemService.RequeueAsync(videoId);
+
+            if (success)
+            {
+                successMessage = "Video re-queued successfully!";
+                await LoadDataAsync();
+
+                // Clear message after 2 seconds
+                _ = Task.Delay(2000).ContinueWith(_ => InvokeAsync(() =>
+                {
+                    successMessage = null;
+                    StateHasChanged();
+                }));
+            }
+            else
+            {
+                errorMessage = "Failed to re-queue video. The video file may be missing.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error re-queueing video: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}

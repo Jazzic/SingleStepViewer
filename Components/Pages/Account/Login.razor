@@ -1,0 +1,86 @@
+@page "/account/login"
+@using Microsoft.AspNetCore.Identity
+@using SingleStepViewer.Data.Entities
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager NavigationManager
+
+<PageTitle>Login - SingleStepViewer</PageTitle>
+
+<div class="auth-container">
+    <div class="auth-card">
+        <h2>Login</h2>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        <EditForm Model="loginModel" OnValidSubmit="HandleLogin" FormName="login">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" />
+
+            <div class="form-group">
+                <label for="email">Email</label>
+                <InputText id="email" @bind-Value="loginModel.Email" class="form-control" />
+                <ValidationMessage For="() => loginModel.Email" />
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <InputText id="password" @bind-Value="loginModel.Password" type="password" class="form-control" />
+                <ValidationMessage For="() => loginModel.Password" />
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <InputCheckbox @bind-Value="loginModel.RememberMe" />
+                    Remember me
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Login</button>
+        </EditForm>
+
+        <div class="auth-links">
+            <p>Don't have an account? <a href="/account/register">Register here</a></p>
+            <p>Default admin: admin@singlestep.local / Admin123!</p>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private LoginModel loginModel { get; set; } = new();
+
+    private string? errorMessage;
+
+    protected override void OnInitialized()
+    {
+        loginModel ??= new();
+    }
+
+    private async Task HandleLogin()
+    {
+        var result = await SignInManager.PasswordSignInAsync(
+            loginModel.Email,
+            loginModel.Password,
+            loginModel.RememberMe,
+            lockoutOnFailure: false);
+
+        if (result.Succeeded)
+        {
+            NavigationManager.NavigateTo("/", forceLoad: true);
+        }
+        else
+        {
+            errorMessage = "Invalid email or password.";
+        }
+    }
+
+    public class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public bool RememberMe { get; set; }
+    }
+}

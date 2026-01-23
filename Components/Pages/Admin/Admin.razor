@@ -1,0 +1,204 @@
+@page "/admin"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Identity
+@using SingleStepViewer.Data.Entities
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject ILogger<Admin> Logger
+
+<PageTitle>Admin - SingleStepViewer</PageTitle>
+
+<h1>Admin Dashboard</h1>
+
+@if (errorMessage != null)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (successMessage != null)
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+<div class="card">
+    <h3>User Management</h3>
+
+    @if (isLoading)
+    {
+        <p>Loading users...</p>
+    }
+    else if (!users.Any())
+    {
+        <p>No users found.</p>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Roles</th>
+                    <th>Created</th>
+                    <th>Last Played</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var user in users)
+                {
+                    <tr>
+                        <td>@user.UserName</td>
+                        <td>@user.Email</td>
+                        <td>
+                            @foreach (var role in userRoles[user.Id])
+                            {
+                                <span class="badge bg-primary">@role</span>
+                            }
+                        </td>
+                        <td>@user.CreatedAt.ToLocalTime().ToString("g")</td>
+                        <td>@(user.LastPlayedAt?.ToLocalTime().ToString("g") ?? "Never")</td>
+                        <td>
+                            <button class="btn btn-sm btn-warning" @onclick="@(() => ResetUserPassword(user.Id, user.UserName ?? user.Email ?? "user"))" disabled="@isProcessing">
+                                Reset Password
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (newPassword != null)
+{
+    <div class="modal" style="display: block; background: rgba(0,0,0,0.5);" @onclick="ClosePasswordModal">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Password Reset Successful</h5>
+                    <button type="button" class="btn-close" @onclick="ClosePasswordModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>User:</strong> @resetUserName</p>
+                    <p><strong>New Temporary Password:</strong></p>
+                    <div class="alert alert-warning">
+                        <h4 style="font-family: monospace;">@newPassword</h4>
+                    </div>
+                    <p class="text-danger"><small>This password will only be shown once. Please copy it and share it with the user securely.</small></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="ClosePasswordModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ApplicationUser> users = new();
+    private Dictionary<string, List<string>> userRoles = new();
+    private bool isLoading = true;
+    private bool isProcessing = false;
+    private string? errorMessage;
+    private string? successMessage;
+    private string? newPassword;
+    private string? resetUserName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsersAsync();
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+
+            users = UserManager.Users.OrderBy(u => u.UserName).ToList();
+
+            // Load roles for each user
+            userRoles.Clear();
+
+            foreach (var user in users)
+            {
+                var roles = await UserManager.GetRolesAsync(user);
+                userRoles[user.Id] = roles.ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading users: {ex.Message}";
+            Logger.LogError(ex, "Error loading users");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task ResetUserPassword(string userId, string userName)
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                errorMessage = "User not found";
+                return;
+            }
+
+            // Generate a random temporary password
+            var tempPassword = GenerateTemporaryPassword();
+
+            // Remove old password and set new one
+            await UserManager.RemovePasswordAsync(user);
+            var result = await UserManager.AddPasswordAsync(user, tempPassword);
+
+            if (result.Succeeded)
+            {
+                newPassword = tempPassword;
+                resetUserName = userName;
+                Logger.LogInformation("Password reset for user {UserId} by admin", userId);
+
+                // Reload users to update the password hash display
+                await LoadUsersAsync();
+            }
+            else
+            {
+                errorMessage = $"Failed to reset password: {string.Join(", ", result.Errors.Select(e => e.Description))}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error resetting password: {ex.Message}";
+            Logger.LogError(ex, "Error resetting password for user {UserId}", userId);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private string GenerateTemporaryPassword()
+    {
+        // Generate a random 12-character password with letters and numbers
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        var random = new Random();
+        return new string(Enumerable.Repeat(chars, 12)
+            .Select(s => s[random.Next(s.Length)]).ToArray());
+    }
+
+    private void ClosePasswordModal()
+    {
+        newPassword = null;
+        resetUserName = null;
+    }
+}

@@ -1,0 +1,149 @@
+@page "/queue"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@using SingleStepViewer.Data.Entities
+@using SingleStepViewer.Services.Interfaces
+@attribute [Authorize]
+@inject IQueueManager QueueManager
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Playback Queue - SingleStepViewer</PageTitle>
+
+<h1>Playback Queue</h1>
+
+<p>Videos are ordered by a weighted fair algorithm that balances priority with fairness.</p>
+
+@if (errorMessage != null)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<div class="queue-container">
+    @if (isLoading)
+    {
+        <p>Loading queue...</p>
+    }
+    else if (upcomingVideos == null || !upcomingVideos.Any())
+    {
+        <div class="card">
+            <p>The queue is empty. Add videos to your playlists to get started!</p>
+            <a href="/playlists" class="btn btn-primary">Go to My Playlists</a>
+        </div>
+    }
+    else
+    {
+        <div class="queue-list">
+            @{
+                int position = 1;
+            }
+            @foreach (var video in upcomingVideos)
+            {
+                <div class="queue-item card">
+                    <div class="position-badge">
+                        <span>#{position}</span>
+                    </div>
+                    <div class="queue-item-content">
+                        @if (!string.IsNullOrEmpty(video.ThumbnailUrl))
+                        {
+                            <img src="@video.ThumbnailUrl" alt="Thumbnail" class="queue-thumbnail" />
+                        }
+                        <div class="queue-info">
+                            <h4>@(video.Title ?? "Loading...")</h4>
+                            <p><strong>User:</strong> @video.Playlist?.User?.UserName</p>
+                            <p><strong>Playlist:</strong> @video.Playlist?.Name</p>
+                            @if (video.Duration.HasValue)
+                            {
+                                <p><strong>Duration:</strong> @video.Duration.Value.ToString(@"mm\:ss")</p>
+                            }
+                        </div>
+                        <div class="queue-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Priority</span>
+                                <span class="stat-value priority-@video.Priority">@video.Priority</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Status</span>
+                                <span class="status-badge status-@video.Status.ToString().ToLower()">
+                                    @video.Status
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                position++;
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private HubConnection? hubConnection;
+    private IEnumerable<PlaylistItem>? upcomingVideos;
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadQueue();
+
+        // Set up SignalR connection for real-time updates
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/playbackHub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        hubConnection.On("QueueUpdated", async () =>
+        {
+            await LoadQueue();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        hubConnection.On<int, string, string>("VideoStarted", async (videoId, title, userName) =>
+        {
+            await LoadQueue();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        hubConnection.On<int>("VideoEnded", async (videoId) =>
+        {
+            await LoadQueue();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SignalR connection error: {ex.Message}");
+        }
+    }
+
+    private async Task LoadQueue()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            upcomingVideos = await QueueManager.GetUpcomingVideosAsync(50);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading queue: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}

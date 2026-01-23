@@ -1,0 +1,17 @@
+@using Microsoft.AspNetCore.Identity
+@using SingleStepViewer.Data.Entities
+@inject NavigationManager NavigationManager
+@inject SignInManager<ApplicationUser> SignInManager
+
+<AuthorizeView>
+    <Authorized>
+        <span>Hello, @context.User.Identity?.Name!</span>
+        <form action="/account/logout" method="post">
+            <AntiforgeryToken />
+            <button type="submit" class="nav-link btn btn-link">Logout</button>
+        </form>
+    </Authorized>
+    <NotAuthorized>
+        <a href="/account/login">Login</a>
+    </NotAuthorized>
+</AuthorizeView>

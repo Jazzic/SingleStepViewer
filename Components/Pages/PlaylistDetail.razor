@@ -1,0 +1,428 @@
+@page "/playlists/{PlaylistId:int}"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Security.Claims
+@using SingleStepViewer.Data.Entities
+@using SingleStepViewer.Services.Interfaces
+@attribute [Authorize]
+@inject IPlaylistService PlaylistService
+@inject IPlaylistItemService PlaylistItemService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>@(playlist?.Name ?? "Playlist") - SingleStepViewer</PageTitle>
+
+@if (playlist == null)
+{
+    if (isLoading)
+    {
+        <p>Loading playlist...</p>
+    }
+    else
+    {
+        <p>Playlist not found</p>
+        <a href="/playlists" class="btn">Back to Playlists</a>
+    }
+}
+else
+{
+    <div class="playlist-detail">
+        <div class="playlist-header">
+            <h1>@playlist.Name</h1>
+            <a href="/playlists" class="btn">Back to Playlists</a>
+        </div>
+
+        @if (!string.IsNullOrEmpty(playlist.Description))
+        {
+            <p class="playlist-description">@playlist.Description</p>
+        }
+
+        <div class="playlist-settings card">
+            <h3>Playlist Settings</h3>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" checked="@(!playlist.RemoveAfterPlaying)"
+                           @onchange="@(e => ToggleRemoveAfterPlaying((bool)e.Value!))" />
+                    Keep videos in queue after playing (loop playlist)
+                </label>
+                <p><small>When enabled, videos will automatically return to the queue after playing. When disabled, videos are removed after one play.</small></p>
+            </div>
+        </div>
+
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        @if (successMessage != null)
+        {
+            <div class="alert alert-success">@successMessage</div>
+        }
+
+        <div class="add-video-section card">
+            <h3>Add Video</h3>
+            <EditForm Model="newVideo" OnValidSubmit="AddVideo">
+                <div class="form-row">
+                    <div class="form-group flex-grow">
+                        <label>Video URL (YouTube, etc.):</label>
+                        <InputText @bind-Value="newVideo.VideoUrl" class="form-control" placeholder="https://www.youtube.com/watch?v=..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Priority (1-10):</label>
+                        <InputNumber @bind-Value="newVideo.Priority" class="form-control" min="1" max="10" />
+                    </div>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                            @if (isSubmitting)
+                            {
+                                <span>Adding...</span>
+                            }
+                            else
+                            {
+                                <span>Add Video</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </EditForm>
+        </div>
+
+        <div class="videos-section">
+            <h3>Videos (@videos.Count())</h3>
+
+            @if (!videos.Any())
+            {
+                <p>No videos in this playlist yet. Add one above!</p>
+            }
+            else
+            {
+                <div class="videos-list">
+                    @foreach (var video in videos)
+                    {
+                        <div class="video-item card">
+                            <div class="video-info">
+                                @if (!string.IsNullOrEmpty(video.ThumbnailUrl))
+                                {
+                                    <img src="@video.ThumbnailUrl" alt="Thumbnail" class="video-thumbnail" />
+                                }
+                                <div class="video-details">
+                                    <h4>@(video.Title ?? "Loading...")</h4>
+                                    <p><small>@video.VideoUrl</small></p>
+                                    @if (video.Duration.HasValue)
+                                    {
+                                        <p><strong>Duration:</strong> @video.Duration.Value.ToString(@"mm\:ss")</p>
+                                    }
+                                    <p>
+                                        <strong>Status:</strong>
+                                        <span class="status-badge status-@video.Status.ToString().ToLower()">
+                                            @video.Status
+                                        </span>
+                                    </p>
+                                    @if (video.Status == PlaylistItemStatus.Error && !string.IsNullOrEmpty(video.ErrorMessage))
+                                    {
+                                        <p class="error-text"><small>@video.ErrorMessage</small></p>
+                                    }
+                                </div>
+                            </div>
+                            <div class="video-actions">
+                                <div class="priority-control">
+                                    <label>Priority:</label>
+                                    <input type="number" min="1" max="10" value="@video.Priority"
+                                           @onchange="@(e => UpdatePriority(video.Id, int.Parse(e.Value?.ToString() ?? "5")))"
+                                           class="form-control priority-input" />
+                                </div>
+                                @if (video.Status == PlaylistItemStatus.Played || video.Status == PlaylistItemStatus.Error)
+                                {
+                                    <button class="btn btn-primary" @onclick="() => RequeueVideo(video.Id)">🔄 Re-queue</button>
+                                }
+                                <button class="btn btn-danger" @onclick="() => DeleteVideo(video.Id)">Delete</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int PlaylistId { get; set; }
+
+    private Playlist? playlist;
+    private IEnumerable<PlaylistItem> videos = Enumerable.Empty<PlaylistItem>();
+    private bool isLoading = true;
+    private bool isSubmitting = false;
+    private string? errorMessage;
+    private string? successMessage;
+    private string? userId;
+    private NewVideoModel newVideo = new() { Priority = 5 };
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        userId = authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        await LoadPlaylist();
+        await InitializeSignalR();
+    }
+
+    private async Task InitializeSignalR()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/playbackHub"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<int, string, string>("VideoStarted", async (videoId, title, userName) =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadPlaylist();
+                    StateHasChanged();
+                });
+            });
+
+            _hubConnection.On<int>("VideoEnded", async (videoId) =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadPlaylist();
+                    StateHasChanged();
+                });
+            });
+
+            _hubConnection.On<int>("VideoDownloadStarted", async (videoId) =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadPlaylist();
+                    StateHasChanged();
+                });
+            });
+
+            _hubConnection.On<int>("VideoDownloadCompleted", async (videoId) =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadPlaylist();
+                    StateHasChanged();
+                });
+            });
+
+            _hubConnection.On<int, string>("VideoDownloadFailed", async (videoId, errorMessage) =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadPlaylist();
+                    StateHasChanged();
+                });
+            });
+
+            _hubConnection.On("QueueUpdated", async () =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadPlaylist();
+                    StateHasChanged();
+                });
+            });
+
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error connecting to real-time updates: {ex.Message}";
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection != null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+
+    private async Task LoadPlaylist()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+
+            playlist = await PlaylistService.GetPlaylistByIdAsync(PlaylistId);
+
+            if (playlist == null)
+            {
+                errorMessage = "Playlist not found";
+                return;
+            }
+
+            // Check if user owns this playlist
+            if (playlist.UserId != userId)
+            {
+                errorMessage = "You don't have permission to view this playlist";
+                playlist = null;
+                return;
+            }
+
+            videos = await PlaylistItemService.GetByPlaylistIdAsync(PlaylistId);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading playlist: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task AddVideo()
+    {
+        try
+        {
+            isSubmitting = true;
+            errorMessage = null;
+            successMessage = null;
+
+            if (string.IsNullOrWhiteSpace(newVideo.VideoUrl))
+            {
+                errorMessage = "Please enter a video URL";
+                return;
+            }
+
+            await PlaylistItemService.AddVideoAsync(PlaylistId, newVideo.VideoUrl, newVideo.Priority);
+
+            successMessage = "Video added! It will be downloaded in the background.";
+            newVideo = new NewVideoModel { Priority = 5 };
+
+            await LoadPlaylist();
+
+            // Clear success message after 3 seconds
+            _ = Task.Delay(3000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                successMessage = null;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error adding video: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task UpdatePriority(int videoId, int priority)
+    {
+        try
+        {
+            priority = Math.Clamp(priority, 1, 10);
+            await PlaylistItemService.UpdatePriorityAsync(videoId, priority);
+            await LoadPlaylist();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error updating priority: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteVideo(int videoId)
+    {
+        try
+        {
+            await PlaylistItemService.DeleteAsync(videoId);
+            successMessage = "Video deleted successfully!";
+            await LoadPlaylist();
+
+            // Clear success message after 3 seconds
+            _ = Task.Delay(3000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                successMessage = null;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting video: {ex.Message}";
+        }
+    }
+
+    private async Task RequeueVideo(int videoId)
+    {
+        try
+        {
+            errorMessage = null;
+            successMessage = null;
+
+            var success = await PlaylistItemService.RequeueAsync(videoId);
+
+            if (success)
+            {
+                successMessage = "Video re-queued successfully!";
+                await LoadPlaylist();
+
+                // Clear success message after 3 seconds
+                _ = Task.Delay(3000).ContinueWith(_ => InvokeAsync(() =>
+                {
+                    successMessage = null;
+                    StateHasChanged();
+                }));
+            }
+            else
+            {
+                errorMessage = "Failed to re-queue video. The video file may be missing.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error re-queueing video: {ex.Message}";
+        }
+    }
+
+    private async Task ToggleRemoveAfterPlaying(bool keepInQueue)
+    {
+        try
+        {
+            // keepInQueue is the checkbox value, RemoveAfterPlaying is the opposite
+            bool removeAfterPlaying = !keepInQueue;
+            await PlaylistService.UpdateRemoveAfterPlayingAsync(PlaylistId, removeAfterPlaying);
+
+            if (playlist != null)
+            {
+                playlist.RemoveAfterPlaying = removeAfterPlaying;
+            }
+
+            successMessage = keepInQueue
+                ? "Videos will now loop after playing!"
+                : "Videos will be removed after playing.";
+
+            // Clear success message after 3 seconds
+            _ = Task.Delay(3000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                successMessage = null;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error updating playlist settings: {ex.Message}";
+        }
+    }
+
+    public class NewVideoModel
+    {
+        public string VideoUrl { get; set; } = string.Empty;
+        public int Priority { get; set; } = 5;
+    }
+}

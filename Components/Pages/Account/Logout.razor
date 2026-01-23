@@ -1,0 +1,13 @@
+@page "/account/logout"
+@using Microsoft.AspNetCore.Identity
+@using SingleStepViewer.Data.Entities
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager NavigationManager
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await SignInManager.SignOutAsync();
+        NavigationManager.NavigateTo("/account/login", forceLoad: true);
+    }
+}

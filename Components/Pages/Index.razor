@@ -1,0 +1,342 @@
+@page "/"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.EntityFrameworkCore
+@using SingleStepViewer.Data
+@using SingleStepViewer.Data.Entities
+@using SingleStepViewer.Services.Interfaces
+@attribute [Authorize]
+@inject ApplicationDbContext DbContext
+@inject IQueueManager QueueManager
+@inject IPlaybackService PlaybackService
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Queue - SingleStepViewer</PageTitle>
+
+<h1>Playback Queue</h1>
+
+<p>Videos are ordered by a weighted fair algorithm that balances priority with fairness.</p>
+
+@if (errorMessage != null)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (successMessage != null)
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+<div class="queue-container">
+    @if (currentVideo != null)
+    {
+        <div class="card now-playing-card">
+            <h3>Now Playing</h3>
+            <div class="queue-item">
+                <div class="position-badge playing">
+                    <span>▶</span>
+                </div>
+                <div class="queue-item-content">
+                    @if (!string.IsNullOrEmpty(currentVideo.ThumbnailUrl))
+                    {
+                        <img src="@currentVideo.ThumbnailUrl" alt="Thumbnail" class="queue-thumbnail" />
+                    }
+                    <div class="queue-info">
+                        <h4>@(currentVideo.Title ?? "Loading...")</h4>
+                        <p><strong>User:</strong> @currentVideo.Playlist?.User?.UserName</p>
+                        <p><strong>Playlist:</strong> @currentVideo.Playlist?.Name</p>
+                        @if (currentVideo.Duration.HasValue)
+                        {
+                            <p><strong>Duration:</strong> @currentVideo.Duration.Value.ToString(@"mm\:ss")</p>
+                        }
+                    </div>
+                    <div class="queue-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Priority</span>
+                            <span class="stat-value priority-@currentVideo.Priority">@currentVideo.Priority</span>
+                        </div>
+                        <div class="playback-controls">
+                            <button class="btn btn-primary" @onclick="RestartVideo" disabled="@isProcessing">
+                                🔄 Restart
+                            </button>
+                            <button class="btn btn-danger" @onclick="SkipVideo" disabled="@isProcessing">
+                                ⏭️ Skip
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <p>Loading queue...</p>
+    }
+    else if (upcomingVideos == null || !upcomingVideos.Any())
+    {
+        @if (currentVideo == null)
+        {
+            <div class="card">
+                <p>The queue is empty. Add videos to your playlists to get started!</p>
+                <a href="/playlists" class="btn btn-primary">Go to My Playlists</a>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="card">
+            <h3>Up Next (@upcomingVideos.Count() videos)</h3>
+            <div class="queue-list">
+                @{
+                    int position = 1;
+                }
+                @foreach (var video in upcomingVideos)
+                {
+                    <div class="queue-item card">
+                        <div class="position-badge">
+                            <span>#@position</span>
+                        </div>
+                        <div class="queue-item-content">
+                            @if (!string.IsNullOrEmpty(video.ThumbnailUrl))
+                            {
+                                <img src="@video.ThumbnailUrl" alt="Thumbnail" class="queue-thumbnail" />
+                            }
+                            <div class="queue-info">
+                                <h4>@(video.Title ?? "Loading...")</h4>
+                                <p><strong>User:</strong> @video.Playlist?.User?.UserName</p>
+                                <p><strong>Playlist:</strong> @video.Playlist?.Name</p>
+                                @if (video.Duration.HasValue)
+                                {
+                                    <p><strong>Duration:</strong> @video.Duration.Value.ToString(@"mm\:ss")</p>
+                                }
+                            </div>
+                            <div class="queue-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">Priority</span>
+                                    <span class="stat-value priority-@video.Priority">@video.Priority</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Status</span>
+                                    <span class="status-badge status-@video.Status.ToString().ToLower()">
+                                        @video.Status
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    position++;
+                }
+            </div>
+        </div>
+    }
+
+    <div class="card">
+        <h3>Statistics</h3>
+        <p><strong>Pending Downloads:</strong> @pendingCount</p>
+        <p><strong>Ready to Play:</strong> @readyCount</p>
+        <p><strong>Played:</strong> @playedCount</p>
+        <div style="margin-top: 1rem;">
+            <a href="/playlists" class="btn btn-primary">Manage My Playlists</a>
+            <a href="/history" class="btn btn-secondary">View History</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private HubConnection? hubConnection;
+    private PlaylistItem? currentVideo;
+    private IEnumerable<PlaylistItem>? upcomingVideos;
+    private int pendingCount;
+    private int readyCount;
+    private int playedCount;
+    private bool isLoading = true;
+    private bool isProcessing = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+
+        // Set up SignalR connection
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/playbackHub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        hubConnection.On<int, string, string>("VideoStarted", async (videoId, title, userName) =>
+        {
+            try
+            {
+                Console.WriteLine($"SignalR: VideoStarted event received - {videoId}: {title}");
+                await InvokeAsync(async () =>
+                {
+                    await LoadDataAsync();
+                    StateHasChanged();
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error handling VideoStarted: {ex.Message}");
+            }
+        });
+
+        hubConnection.On<int>("VideoEnded", async (videoId) =>
+        {
+            try
+            {
+                Console.WriteLine($"SignalR: VideoEnded event received - {videoId}");
+                await InvokeAsync(async () =>
+                {
+                    await LoadDataAsync();
+                    StateHasChanged();
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error handling VideoEnded: {ex.Message}");
+            }
+        });
+
+        hubConnection.On("QueueUpdated", async () =>
+        {
+            try
+            {
+                Console.WriteLine("SignalR: QueueUpdated event received");
+                await InvokeAsync(async () =>
+                {
+                    await LoadDataAsync();
+                    StateHasChanged();
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error handling QueueUpdated: {ex.Message}");
+            }
+        });
+
+        try
+        {
+            await hubConnection.StartAsync();
+            Console.WriteLine($"SignalR connected: {hubConnection.ConnectionId}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SignalR connection error: {ex.Message}");
+            errorMessage = $"Real-time updates unavailable: {ex.Message}";
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            isLoading = true;
+
+            // Clear any tracked entities to ensure fresh data from database
+            DbContext.ChangeTracker.Clear();
+
+            // Get current playing video
+            var queueState = await DbContext.QueueState
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
+
+            if (queueState?.CurrentPlaylistItemId != null)
+            {
+                currentVideo = await DbContext.PlaylistItems
+                    .AsNoTracking()
+                    .Include(i => i.Playlist)
+                    .ThenInclude(p => p.User)
+                    .FirstOrDefaultAsync(i => i.Id == queueState.CurrentPlaylistItemId);
+            }
+            else
+            {
+                currentVideo = null;
+            }
+
+            // Get upcoming videos
+            upcomingVideos = await QueueManager.GetUpcomingVideosAsync(50);
+
+            // Get statistics
+            pendingCount = await DbContext.PlaylistItems
+                .AsNoTracking()
+                .CountAsync(i => i.Status == PlaylistItemStatus.Pending || i.Status == PlaylistItemStatus.Downloading);
+            readyCount = await DbContext.PlaylistItems
+                .AsNoTracking()
+                .CountAsync(i => i.Status == PlaylistItemStatus.Ready);
+            playedCount = await DbContext.PlaylistItems
+                .AsNoTracking()
+                .CountAsync(i => i.Status == PlaylistItemStatus.Played);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RestartVideo()
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            await PlaybackService.RestartAsync();
+            successMessage = "Video restarted!";
+
+            // Clear message after 2 seconds
+            _ = Task.Delay(2000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                successMessage = null;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error restarting video: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task SkipVideo()
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            await PlaybackService.SkipAsync();
+            successMessage = "Video skipped!";
+
+            // Clear message after 2 seconds
+            _ = Task.Delay(2000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                successMessage = null;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error skipping video: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}
