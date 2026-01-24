@@ -57,10 +57,55 @@
                         <td>@user.UserName</td>
                         <td>@user.Email</td>
                         <td>
-                            @foreach (var role in userRoles[user.Id])
-                            {
-                                <span class="badge bg-primary">@role</span>
-                            }
+                            <div class="role-manager">
+                                @* Display current roles as badges *@
+                                <div class="mb-2">
+                                    @if (userRoles[user.Id].Any())
+                                    {
+                                        @foreach (var role in userRoles[user.Id])
+                                        {
+                                            <span class="badge bg-primary me-1">
+                                                @role
+                                                <button type="button"
+                                                        class="btn-close btn-close-white ms-1"
+                                                        style="font-size: 0.6em; vertical-align: middle;"
+                                                        disabled="@isProcessing"
+                                                        @onclick="@(() => RemoveUserRole(user.Id, role, user.UserName ?? "user"))"
+                                                        aria-label="Remove">
+                                                </button>
+                                            </span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">No roles</span>
+                                    }
+                                </div>
+                                @* Dropdown to manage roles *@
+                                <div class="input-group input-group-sm" style="max-width: 300px;">
+                                    <select class="form-select form-select-sm"
+                                            @bind="selectedRoleForUser[user.Id]"
+                                            disabled="@isProcessing">
+                                        <option value="">-- Select role --</option>
+                                        @foreach (var role in allRoles)
+                                        {
+                                            <option value="@role">@role</option>
+                                        }
+                                    </select>
+                                    <button class="btn btn-sm btn-success"
+                                            type="button"
+                                            disabled="@isProcessing"
+                                            @onclick="@(() => AddUserRole(user.Id, selectedRoleForUser[user.Id], user.UserName ?? "user"))">
+                                        Add
+                                    </button>
+                                    <button class="btn btn-sm btn-danger"
+                                            type="button"
+                                            disabled="@isProcessing"
+                                            @onclick="@(() => RemoveUserRole(user.Id, selectedRoleForUser[user.Id], user.UserName ?? "user"))">
+                                        Remove
+                                    </button>
+                                </div>
+                            </div>
                         </td>
                         <td>@user.CreatedAt.ToLocalTime().ToString("g")</td>
                         <td>@(user.LastPlayedAt?.ToLocalTime().ToString("g") ?? "Never")</td>
@@ -78,6 +123,74 @@
                 }
             </tbody>
         </table>
+    }
+</div>
+
+<div class="card" style="margin-top: 2rem;">
+    <h3>Role Management</h3>
+
+    @if (isLoading)
+    {
+        <p>Loading roles...</p>
+    }
+    else
+    {
+        <div class="mb-4">
+            <h5>Existing Roles</h5>
+            @if (allRoles.Any())
+            {
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Role Name</th>
+                            <th>Users</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var role in allRoles)
+                        {
+                            var usersWithRole = users.Where(u => userRoles.ContainsKey(u.Id) && userRoles[u.Id].Contains(role)).Count();
+                            <tr>
+                                <td><span class="badge bg-secondary">@role</span></td>
+                                <td>@usersWithRole</td>
+                                <td>
+                                    <button type="button"
+                                            class="btn btn-sm btn-danger"
+                                            disabled="@isProcessing"
+                                            @onclick="@(() => DeleteRole(role))">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <p class="text-muted">No roles defined.</p>
+            }
+        </div>
+
+        <div>
+            <h5>Create New Role</h5>
+            <div class="input-group" style="max-width: 400px;">
+                <input type="text"
+                       class="form-control"
+                       placeholder="Enter role name"
+                       @bind="newRoleName"
+                       @bind:event="oninput"
+                       disabled="@isProcessing" />
+                <button class="btn btn-primary"
+                        type="button"
+                        disabled="@isProcessing"
+                        @onclick="CreateRole">
+                    Create Role
+                </button>
+            </div>
+            <small class="text-muted">Role names should be alphanumeric (e.g., Admin, Moderator, Regular)</small>
+        </div>
     }
 </div>
 
@@ -109,12 +222,15 @@
 @code {
     private List<ApplicationUser> users = new();
     private Dictionary<string, List<string>> userRoles = new();
+    private Dictionary<string, string> selectedRoleForUser = new();
+    private List<string> allRoles = new();
     private bool isLoading = true;
     private bool isProcessing = false;
     private string? errorMessage;
     private string? successMessage;
     private string? newPassword;
     private string? resetUserName;
+    private string newRoleName = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,13 +246,18 @@
 
             users = await _context.Users.OrderBy(u => u.UserName).ToListAsync();
 
+            // Load all available roles
+            allRoles = await RoleManager.Roles.Select(r => r.Name!).ToListAsync();
+
             // Load roles for each user
             userRoles.Clear();
+            selectedRoleForUser.Clear();
 
             foreach (var user in users)
             {
                 var roles = await UserManager.GetRolesAsync(user);
                 userRoles[user.Id] = roles.ToList();
+                selectedRoleForUser[user.Id] = "";
             }
         }
         catch (Exception ex)
@@ -252,6 +373,196 @@
         {
             errorMessage = $"Error deleting user: {ex.Message}";
             Logger.LogError(ex, "Error deleting user {UserId}", userId);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task AddUserRole(string userId, string roleName, string userName)
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            if (string.IsNullOrEmpty(roleName))
+            {
+                errorMessage = "Please select a role";
+                return;
+            }
+
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                errorMessage = "User not found";
+                return;
+            }
+
+            var result = await UserManager.AddToRoleAsync(user, roleName);
+            if (result.Succeeded)
+            {
+                successMessage = $"Added '{roleName}' role to {userName}";
+                Logger.LogInformation("Added {Role} role to user {UserId}", roleName, userId);
+                await LoadUsersAsync();
+                selectedRoleForUser[userId] = ""; // Reset dropdown
+            }
+            else
+            {
+                errorMessage = $"Failed to add role: {string.Join(", ", result.Errors.Select(e => e.Description))}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error adding role: {ex.Message}";
+            Logger.LogError(ex, "Error adding role to user {UserId}", userId);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task RemoveUserRole(string userId, string roleName, string userName)
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                errorMessage = "User not found";
+                return;
+            }
+
+            var result = await UserManager.RemoveFromRoleAsync(user, roleName);
+            if (result.Succeeded)
+            {
+                successMessage = $"Removed '{roleName}' role from {userName}";
+                Logger.LogInformation("Removed {Role} role from user {UserId}", roleName, userId);
+                await LoadUsersAsync();
+            }
+            else
+            {
+                errorMessage = $"Failed to remove role: {string.Join(", ", result.Errors.Select(e => e.Description))}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error removing role: {ex.Message}";
+            Logger.LogError(ex, "Error removing role from user {UserId}", userId);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task CreateRole()
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            if (string.IsNullOrWhiteSpace(newRoleName))
+            {
+                errorMessage = "Role name cannot be empty";
+                return;
+            }
+
+            // Validate role name format
+            if (!System.Text.RegularExpressions.Regex.IsMatch(newRoleName, @"^[a-zA-Z0-9_]+$"))
+            {
+                errorMessage = "Role name must be alphanumeric (letters, numbers, and underscores only)";
+                return;
+            }
+
+            // Check if role already exists
+            var roleExists = await RoleManager.RoleExistsAsync(newRoleName);
+            if (roleExists)
+            {
+                errorMessage = $"Role '{newRoleName}' already exists";
+                return;
+            }
+
+            var result = await RoleManager.CreateAsync(new IdentityRole(newRoleName));
+            if (result.Succeeded)
+            {
+                successMessage = $"Role '{newRoleName}' created successfully";
+                Logger.LogInformation("Created new role: {RoleName}", newRoleName);
+                newRoleName = string.Empty;
+                await LoadUsersAsync();
+            }
+            else
+            {
+                errorMessage = $"Failed to create role: {string.Join(", ", result.Errors.Select(e => e.Description))}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error creating role: {ex.Message}";
+            Logger.LogError(ex, "Error creating role {RoleName}", newRoleName);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task DeleteRole(string roleName)
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            // Check if any users have this role
+            var usersWithRole = new List<ApplicationUser>();
+            foreach (var user in users)
+            {
+                if (userRoles.ContainsKey(user.Id) && userRoles[user.Id].Contains(roleName))
+                {
+                    usersWithRole.Add(user);
+                }
+            }
+
+            if (usersWithRole.Any())
+            {
+                errorMessage = $"Cannot delete role '{roleName}' because {usersWithRole.Count} user(s) have this role. Remove the role from all users first.";
+                return;
+            }
+
+            var role = await RoleManager.FindByNameAsync(roleName);
+            if (role == null)
+            {
+                errorMessage = "Role not found";
+                return;
+            }
+
+            var result = await RoleManager.DeleteAsync(role);
+            if (result.Succeeded)
+            {
+                successMessage = $"Role '{roleName}' deleted successfully";
+                Logger.LogInformation("Deleted role: {RoleName}", roleName);
+                await LoadUsersAsync();
+            }
+            else
+            {
+                errorMessage = $"Failed to delete role: {string.Join(", ", result.Errors.Select(e => e.Description))}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting role: {ex.Message}";
+            Logger.LogError(ex, "Error deleting role {RoleName}", roleName);
         }
         finally
         {
