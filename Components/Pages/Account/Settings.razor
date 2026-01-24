@@ -65,19 +65,19 @@
 
         <div class="form-group">
             <label for="currentPassword">Current Password</label>
-            <InputText id="currentPassword" @bind-Value="passwordModel.CurrentPassword" type="password" class="form-control" />
+            <InputText id="currentPassword" @bind-Value="passwordModel.CurrentPassword" type="password" class="form-control" autocomplete="current-password" />
             <ValidationMessage For="() => passwordModel.CurrentPassword" />
         </div>
 
         <div class="form-group">
             <label for="newPassword">New Password</label>
-            <InputText id="newPassword" @bind-Value="passwordModel.NewPassword" type="password" class="form-control" />
+            <InputText id="newPassword" @bind-Value="passwordModel.NewPassword" type="password" class="form-control" autocomplete="new-password" />
             <ValidationMessage For="() => passwordModel.NewPassword" />
         </div>
 
         <div class="form-group">
             <label for="confirmNewPassword">Confirm New Password</label>
-            <InputText id="confirmNewPassword" @bind-Value="passwordModel.ConfirmNewPassword" type="password" class="form-control" />
+            <InputText id="confirmNewPassword" @bind-Value="passwordModel.ConfirmNewPassword" type="password" class="form-control" autocomplete="new-password" />
             <ValidationMessage For="() => passwordModel.ConfirmNewPassword" />
         </div>
 

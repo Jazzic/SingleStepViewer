@@ -8,7 +8,8 @@
       "Bash(dotnet tool install:*)",
       "Bash(dotnet list:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nEnhance CLAUDE.md with comprehensive project documentation\n\nUpdated CLAUDE.md to accurately reflect the project as a Blazor Server web application rather than a console app. Added detailed information about architecture, configuration, database management, and development workflows to provide better guidance for code assistance.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nEnhance CLAUDE.md with comprehensive project documentation\n\nUpdated CLAUDE.md to accurately reflect the project as a Blazor Server web application rather than a console app. Added detailed information about architecture, configuration, database management, and development workflows to provide better guidance for code assistance.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(timeout 5 cmd:*)"
     ]
   }
 }

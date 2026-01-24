@@ -1,7 +1,9 @@
 @page "/account/login"
 @using Microsoft.AspNetCore.Identity
 @using SingleStepViewer.Data.Entities
+@using System.ComponentModel.DataAnnotations
 @inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
 @inject NavigationManager NavigationManager
 
 <PageTitle>Login - SingleStepViewer</PageTitle>
@@ -20,22 +22,15 @@
             <ValidationSummary class="text-danger" />
 
             <div class="form-group">
-                <label for="email">Email</label>
-                <InputText id="email" @bind-Value="loginModel.Email" class="form-control" />
-                <ValidationMessage For="() => loginModel.Email" />
+                <label for="username">Username or Email</label>
+                <InputText id="username" @bind-Value="loginModel.UsernameOrEmail" class="form-control" autocomplete="username" />
+                <ValidationMessage For="() => loginModel.UsernameOrEmail" />
             </div>
 
             <div class="form-group">
                 <label for="password">Password</label>
-                <InputText id="password" @bind-Value="loginModel.Password" type="password" class="form-control" />
+                <InputText id="password" @bind-Value="loginModel.Password" type="password" class="form-control" autocomplete="current-password" />
                 <ValidationMessage For="() => loginModel.Password" />
-            </div>
-
-            <div class="form-group">
-                <label>
-                    <InputCheckbox @bind-Value="loginModel.RememberMe" />
-                    Remember me
-                </label>
             </div>
 
             <button type="submit" class="btn btn-primary">Login</button>
@@ -61,10 +56,23 @@
 
     private async Task HandleLogin()
     {
+        // Try to find user by email or username
+        string username = loginModel.UsernameOrEmail;
+
+        // If input contains '@', it's likely an email, so look up the username
+        if (loginModel.UsernameOrEmail.Contains('@'))
+        {
+            var user = await UserManager.FindByEmailAsync(loginModel.UsernameOrEmail);
+            if (user != null)
+            {
+                username = user.UserName ?? loginModel.UsernameOrEmail;
+            }
+        }
+
         var result = await SignInManager.PasswordSignInAsync(
-            loginModel.Email,
+            username,
             loginModel.Password,
-            loginModel.RememberMe,
+            isPersistent: false,
             lockoutOnFailure: false);
 
         if (result.Succeeded)
@@ -73,14 +81,16 @@
         }
         else
         {
-            errorMessage = "Invalid email or password.";
+            errorMessage = "Invalid username/email or password.";
         }
     }
 
     public class LoginModel
     {
-        public string Email { get; set; } = string.Empty;
+        [Required]
+        public string UsernameOrEmail { get; set; } = string.Empty;
+
+        [Required]
         public string Password { get; set; } = string.Empty;
-        public bool RememberMe { get; set; }
     }
 }

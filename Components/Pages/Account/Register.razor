@@ -23,25 +23,25 @@
 
             <div class="form-group">
                 <label for="username">Username</label>
-                <InputText id="username" @bind-Value="registerModel.UserName" class="form-control" />
+                <InputText id="username" @bind-Value="registerModel.UserName" class="form-control" autocomplete="username" />
                 <ValidationMessage For="() => registerModel.UserName" />
             </div>
 
             <div class="form-group">
                 <label for="email">Email</label>
-                <InputText id="email" @bind-Value="registerModel.Email" class="form-control" />
+                <InputText id="email" @bind-Value="registerModel.Email" class="form-control" autocomplete="email" />
                 <ValidationMessage For="() => registerModel.Email" />
             </div>
 
             <div class="form-group">
                 <label for="password">Password</label>
-                <InputText id="password" @bind-Value="registerModel.Password" type="password" class="form-control" />
+                <InputText id="password" @bind-Value="registerModel.Password" type="password" class="form-control" autocomplete="new-password" />
                 <ValidationMessage For="() => registerModel.Password" />
             </div>
 
             <div class="form-group">
                 <label for="confirmPassword">Confirm Password</label>
-                <InputText id="confirmPassword" @bind-Value="registerModel.ConfirmPassword" type="password" class="form-control" />
+                <InputText id="confirmPassword" @bind-Value="registerModel.ConfirmPassword" type="password" class="form-control" autocomplete="new-password" />
                 <ValidationMessage For="() => registerModel.ConfirmPassword" />
             </div>
 
