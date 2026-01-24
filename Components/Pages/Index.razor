@@ -76,6 +76,17 @@
                         </div>
                     </div>
                 </div>
+                <div class="position-slider-container">
+                    <span class="time-display">@FormatTime(currentTime)</span>
+                    <input type="range"
+                           class="position-slider"
+                           min="0"
+                           max="100"
+                           step="0.1"
+                           value="@currentPosition.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           @onchange="OnPositionChanged" />
+                    <span class="time-display">@FormatTime(duration)</span>
+                </div>
             </div>
         </div>
     }
@@ -164,6 +175,10 @@
     private bool isLoading = true;
     private bool isProcessing = false;
     private bool isPaused = false;
+    private float currentPosition = 0;
+    private TimeSpan currentTime = TimeSpan.Zero;
+    private TimeSpan duration = TimeSpan.Zero;
+    private System.Threading.Timer? positionTimer;
     private string? errorMessage;
     private string? successMessage;
 
@@ -238,6 +253,16 @@
             Console.WriteLine($"SignalR connection error: {ex.Message}");
             errorMessage = $"Real-time updates unavailable: {ex.Message}";
         }
+
+        // Start position update timer (every 500ms)
+        positionTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(() =>
+            {
+                UpdatePositionFromService();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
     private async Task LoadDataAsync()
@@ -270,8 +295,9 @@
             // Get upcoming videos
             upcomingVideos = await QueueManager.GetUpcomingVideosAsync(50);
 
-            // Sync pause state
+            // Sync pause state and position
             isPaused = PlaybackService.IsPaused;
+            UpdatePositionFromService();
 
             // Get statistics
             pendingCount = await DbContext.PlaylistItems
@@ -384,8 +410,41 @@
         }
     }
 
+    private void UpdatePositionFromService()
+    {
+        currentPosition = PlaybackService.Position;
+        currentTime = PlaybackService.CurrentTime;
+        duration = PlaybackService.Duration;
+    }
+
+    private async Task OnPositionChanged(ChangeEventArgs e)
+    {
+        if (float.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var newPosition))
+        {
+            try
+            {
+                await PlaybackService.SeekAsync(newPosition);
+                currentPosition = newPosition;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error seeking: {ex.Message}";
+            }
+        }
+    }
+
+    private string FormatTime(TimeSpan time)
+    {
+        if (time.TotalHours >= 1)
+        {
+            return time.ToString(@"h\:mm\:ss");
+        }
+        return time.ToString(@"mm\:ss");
+    }
+
     public async ValueTask DisposeAsync()
     {
+        positionTimer?.Dispose();
         if (hubConnection is not null)
         {
             await hubConnection.DisposeAsync();

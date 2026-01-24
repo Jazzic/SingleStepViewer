@@ -13,6 +13,10 @@ public interface IPlaybackService
     bool IsPlaying { get; }
     bool IsPaused { get; }
     string? CurrentFilePath { get; }
+    float Position { get; }
+    TimeSpan CurrentTime { get; }
+    TimeSpan Duration { get; }
+    Task SeekAsync(float position);
     event EventHandler? MediaEnded;
     event EventHandler? MediaSkipped;
     event EventHandler<string>? MediaError;

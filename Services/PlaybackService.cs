@@ -25,6 +25,9 @@ public class PlaybackService : IPlaybackService, IDisposable
     public bool IsPlaying => _mediaPlayer?.IsPlaying ?? false;
     public bool IsPaused => _mediaPlayer?.State == LibVLCSharp.Shared.VLCState.Paused;
     public string? CurrentFilePath => _currentFilePath;
+    public float Position => _mediaPlayer?.Position * 100 ?? 0;
+    public TimeSpan CurrentTime => TimeSpan.FromMilliseconds(_mediaPlayer?.Time ?? 0);
+    public TimeSpan Duration => TimeSpan.FromMilliseconds(_mediaPlayer?.Length ?? 0);
 
     public event EventHandler? MediaEnded;
     public event EventHandler? MediaSkipped;
@@ -182,6 +185,31 @@ public class PlaybackService : IPlaybackService, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error resuming playback");
+            throw;
+        }
+    }
+
+    public Task SeekAsync(float position)
+    {
+        try
+        {
+            if (_mediaPlayer != null && _mediaPlayer.Length > 0)
+            {
+                // Position is 0-100, VLC expects 0.0-1.0
+                var vlcPosition = Math.Clamp(position / 100f, 0f, 1f);
+                _mediaPlayer.Position = vlcPosition;
+                _logger.LogInformation("Seeked to position {Position}%", position.ToString("F1"));
+            }
+            else
+            {
+                _logger.LogWarning("Cannot seek - no media loaded");
+            }
+
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error seeking to position {Position}", position);
             throw;
         }
     }
