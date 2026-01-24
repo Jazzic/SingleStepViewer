@@ -114,6 +114,20 @@ dotnet ef migrations script
 
 - **Migrations/** - EF Core database migrations
 
+## Testing and Development Workflow
+
+**IMPORTANT:** Always restart the application after making code changes. Hot reload (`dotnet watch run`) does not reliably pick up all Blazor component changes, especially in the following scenarios:
+- Changes to `@code` blocks in .razor files
+- Changes to dependency injection
+- Changes to authentication/authorization logic
+- Changes to service implementations
+
+After completing code changes, remind the user to:
+1. Stop the running application (Ctrl+C)
+2. Run `dotnet build` to verify compilation
+3. Run `dotnet run` to start with fresh changes
+4. Test the specific functionality that was modified
+
 ## Key Configuration Settings
 
 Edit `appsettings.json` to configure the application:

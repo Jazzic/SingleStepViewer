@@ -135,7 +135,7 @@ try
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
         await EnsureRolesAsync(roleManager);
-        await EnsureAdminUserAsync(userManager);
+        await EnsureAdminUserAsync(userManager, dbContext);
     }
 
     // Ensure video storage directory exists
@@ -171,31 +171,50 @@ static async Task EnsureRolesAsync(RoleManager<IdentityRole> roleManager)
     }
 }
 
-static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager)
+static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager, ApplicationDbContext dbContext)
 {
     const string adminUsername = "admin";
     const string adminEmail = "admin@singlestep.local";
     const string adminPassword = "Admin123!";
 
+    // Check for admin user (respects soft delete filter)
     var adminUser = await userManager.FindByNameAsync(adminUsername);
+
     if (adminUser == null)
     {
-        adminUser = new ApplicationUser
-        {
-            UserName = adminUsername,
-            Email = adminEmail,
-            EmailConfirmed = true
-        };
+        // Check if there's a soft-deleted admin user (bypass filter)
+        var deletedAdmin = await dbContext.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.UserName == adminUsername && u.IsDeleted);
 
-        var result = await userManager.CreateAsync(adminUser, adminPassword);
-        if (result.Succeeded)
+        if (deletedAdmin != null)
         {
-            await userManager.AddToRoleAsync(adminUser, "Admin");
-            Log.Information("Default admin user created - Username: {Username}, Email: {Email}, Password: {Password}", adminUsername, adminEmail, adminPassword);
+            // Restore the soft-deleted admin user
+            deletedAdmin.IsDeleted = false;
+            deletedAdmin.DeletedAt = null;
+            await dbContext.SaveChangesAsync();
+            Log.Information("Restored soft-deleted admin user - Username: {Username}", adminUsername);
         }
         else
         {
-            Log.Error("Failed to create default admin user: {Errors}", string.Join(", ", result.Errors.Select(e => e.Description)));
+            // Create new admin user
+            adminUser = new ApplicationUser
+            {
+                UserName = adminUsername,
+                Email = adminEmail,
+                EmailConfirmed = true
+            };
+
+            var result = await userManager.CreateAsync(adminUser, adminPassword);
+            if (result.Succeeded)
+            {
+                await userManager.AddToRoleAsync(adminUser, "Admin");
+                Log.Information("Default admin user created - Username: {Username}, Email: {Email}, Password: {Password}", adminUsername, adminEmail, adminPassword);
+            }
+            else
+            {
+                Log.Error("Failed to create default admin user: {Errors}", string.Join(", ", result.Errors.Select(e => e.Description)));
+            }
         }
     }
 }

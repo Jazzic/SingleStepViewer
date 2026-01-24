@@ -6,7 +6,7 @@
 <AuthorizeView>
     <Authorized>
         <span>Hello, @context.User.Identity?.Name!</span>
-        <form action="/account/logout" method="post">
+        <form action="/account/logout" method="post" @formname="logout">
             <AntiforgeryToken />
             <button type="submit" class="nav-link btn btn-link">Logout</button>
         </form>
