@@ -1,10 +1,15 @@
 @page "/admin"
 @rendermode InteractiveServer
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SingleStepViewer.Data
 @using SingleStepViewer.Data.Entities
+@using SingleStepViewer.Services.Interfaces
 @attribute [Authorize(Policy = "AdminOnly")]
 @inject UserManager<ApplicationUser> UserManager
 @inject RoleManager<IdentityRole> RoleManager
+@inject ApplicationDbContext _context
+@inject IUserService _userService
 @inject ILogger<Admin> Logger
 
 <PageTitle>Admin - SingleStepViewer</PageTitle>
@@ -63,6 +68,11 @@
                             <button class="btn btn-sm btn-warning" @onclick="@(() => ResetUserPassword(user.Id, user.UserName ?? user.Email ?? "user"))" disabled="@isProcessing">
                                 Reset Password
                             </button>
+                            <button class="btn btn-sm btn-danger ms-2"
+                                    @onclick="@(() => DeleteUser(user.Id, user.UserName ?? user.Email ?? "user"))"
+                                    disabled="@isProcessing">
+                                Delete User
+                            </button>
                         </td>
                     </tr>
                 }
@@ -118,7 +128,7 @@
             isLoading = true;
             errorMessage = null;
 
-            users = UserManager.Users.OrderBy(u => u.UserName).ToList();
+            users = await _context.Users.OrderBy(u => u.UserName).ToListAsync();
 
             // Load roles for each user
             userRoles.Clear();
@@ -200,5 +210,52 @@
     {
         newPassword = null;
         resetUserName = null;
+    }
+
+    private async Task DeleteUser(string userId, string userName)
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                errorMessage = "User not found";
+                return;
+            }
+
+            // Prevent deleting admin users
+            var roles = await UserManager.GetRolesAsync(user);
+            if (roles.Contains("Admin"))
+            {
+                errorMessage = "Cannot delete admin users. Remove admin role first.";
+                return;
+            }
+
+            var success = await _userService.DeleteUserAsync(userId);
+
+            if (success)
+            {
+                successMessage = $"User '{userName}' has been deleted successfully.";
+                Logger.LogInformation("User {UserId} deleted by admin", userId);
+                await LoadUsersAsync();
+            }
+            else
+            {
+                errorMessage = "Failed to delete user.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting user: {ex.Message}";
+            Logger.LogError(ex, "Error deleting user {UserId}", userId);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
     }
 }

@@ -19,12 +19,12 @@ public class UserService : IUserService
 
     public async Task<ApplicationUser?> GetUserByIdAsync(string userId)
     {
-        return await _userManager.FindByIdAsync(userId);
+        return await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
     }
 
     public async Task<ApplicationUser?> GetUserByEmailAsync(string email)
     {
-        return await _userManager.FindByEmailAsync(email);
+        return await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
     }
 
     public async Task<IEnumerable<ApplicationUser>> GetAllUsersAsync()
@@ -34,10 +34,14 @@ public class UserService : IUserService
 
     public async Task<bool> DeleteUserAsync(string userId)
     {
-        var user = await _userManager.FindByIdAsync(userId);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (user == null) return false;
 
-        var result = await _userManager.DeleteAsync(user);
-        return result.Succeeded;
+        user.IsDeleted = true;
+        user.DeletedAt = DateTime.UtcNow;
+        user.SecurityStamp = Guid.NewGuid().ToString(); // Invalidate active sessions
+
+        await _context.SaveChangesAsync();
+        return true;
     }
 }

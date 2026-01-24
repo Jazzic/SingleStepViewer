@@ -1,9 +1,12 @@
 @page "/account/register"
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SingleStepViewer.Data
 @using SingleStepViewer.Data.Entities
 @using System.ComponentModel.DataAnnotations
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
+@inject ApplicationDbContext _context
 @inject NavigationManager NavigationManager
 
 <PageTitle>Register - SingleStepViewer</PageTitle>
@@ -68,7 +71,7 @@
     private async Task HandleRegister()
     {
         // Check if username already exists
-        var existingUser = await UserManager.FindByNameAsync(registerModel.UserName);
+        var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.UserName == registerModel.UserName);
         if (existingUser != null)
         {
             errorMessage = "Username is already taken. Please choose a different username.";

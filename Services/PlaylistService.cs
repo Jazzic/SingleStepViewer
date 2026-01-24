@@ -18,14 +18,27 @@ public class PlaylistService : IPlaylistService
 
     public async Task<Playlist?> GetPlaylistByIdAsync(int id)
     {
-        return await _context.Playlists
+        var playlist = await _context.Playlists
             .Include(p => p.Items)
             .Include(p => p.User)
             .FirstOrDefaultAsync(p => p.Id == id);
+
+        if (playlist?.User == null)
+        {
+            return null;
+        }
+
+        return playlist;
     }
 
     public async Task<IEnumerable<Playlist>> GetUserPlaylistsAsync(string userId)
     {
+        var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
+        if (!userExists)
+        {
+            return Enumerable.Empty<Playlist>();
+        }
+
         return await _context.Playlists
             .Include(p => p.Items)
             .Where(p => p.UserId == userId)

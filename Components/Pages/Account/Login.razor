@@ -1,9 +1,12 @@
 @page "/account/login"
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SingleStepViewer.Data
 @using SingleStepViewer.Data.Entities
 @using System.ComponentModel.DataAnnotations
 @inject SignInManager<ApplicationUser> SignInManager
 @inject UserManager<ApplicationUser> UserManager
+@inject ApplicationDbContext _context
 @inject NavigationManager NavigationManager
 
 <PageTitle>Login - SingleStepViewer</PageTitle>
@@ -56,17 +59,27 @@
 
     private async Task HandleLogin()
     {
-        // Try to find user by email or username
         string username = loginModel.UsernameOrEmail;
+        ApplicationUser? user = null;
 
-        // If input contains '@', it's likely an email, so look up the username
         if (loginModel.UsernameOrEmail.Contains('@'))
         {
-            var user = await UserManager.FindByEmailAsync(loginModel.UsernameOrEmail);
+            user = await _context.Users.FirstOrDefaultAsync(u => u.Email == loginModel.UsernameOrEmail);
             if (user != null)
             {
                 username = user.UserName ?? loginModel.UsernameOrEmail;
             }
+        }
+        else
+        {
+            user = await _context.Users.FirstOrDefaultAsync(u => u.UserName == loginModel.UsernameOrEmail);
+        }
+
+        // Check if deleted
+        if (user != null && user.IsDeleted)
+        {
+            errorMessage = "This account has been deleted.";
+            return;
         }
 
         var result = await SignInManager.PasswordSignInAsync(

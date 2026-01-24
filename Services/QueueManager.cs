@@ -179,7 +179,7 @@ public class QueueManager : IQueueManager
             _context.PlaybackHistory.Add(history);
 
             // Update user's last played time
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
             if (user != null)
             {
                 user.LastPlayedAt = DateTime.UtcNow;

@@ -27,6 +27,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .HasForeignKey(p => p.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // Configure soft delete query filter for ApplicationUser
+        builder.Entity<ApplicationUser>()
+            .HasQueryFilter(u => !u.IsDeleted);
+
         // Configure Playlist relationships
         builder.Entity<Playlist>()
             .HasMany(p => p.Items)

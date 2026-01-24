@@ -1,12 +1,15 @@
 @page "/account/settings"
 @rendermode InteractiveServer
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SingleStepViewer.Data
 @using SingleStepViewer.Data.Entities
 @using System.ComponentModel.DataAnnotations
 @using System.Security.Claims
 @attribute [Authorize]
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
+@inject ApplicationDbContext _context
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager NavigationManager
 
@@ -116,7 +119,7 @@
 
         if (userId != null)
         {
-            currentUser = await UserManager.FindByIdAsync(userId);
+            currentUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
 
             // Pre-fill the username field with current username
             if (currentUser != null)
@@ -153,7 +156,7 @@
             }
 
             // Check if username already exists
-            var existingUser = await UserManager.FindByNameAsync(usernameModel.UserName);
+            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.UserName == usernameModel.UserName);
             if (existingUser != null)
             {
                 errorMessage = "Username is already taken. Please choose a different username.";
