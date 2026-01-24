@@ -1,0 +1,254 @@
+@page "/account/settings"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Identity
+@using SingleStepViewer.Data.Entities
+@using System.ComponentModel.DataAnnotations
+@using System.Security.Claims
+@attribute [Authorize]
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+
+<PageTitle>Account Settings - SingleStepViewer</PageTitle>
+
+<h1>Account Settings</h1>
+
+@if (errorMessage != null)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (successMessage != null)
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+<div class="card">
+    <h3>Profile Information</h3>
+
+    @if (currentUser != null)
+    {
+        <EditForm Model="usernameModel" OnValidSubmit="HandleUpdateUsername" FormName="updateUsername">
+            <DataAnnotationsValidator />
+
+            <div class="form-group">
+                <label for="username">Username</label>
+                <InputText id="username" @bind-Value="usernameModel.UserName" class="form-control" />
+                <ValidationMessage For="() => usernameModel.UserName" />
+            </div>
+
+            <button type="submit" class="btn btn-primary" disabled="@isProcessing">
+                @if (isProcessing)
+                {
+                    <span>Updating...</span>
+                }
+                else
+                {
+                    <span>Update Username</span>
+                }
+            </button>
+        </EditForm>
+
+        <hr />
+
+        <p><strong>Email:</strong> @currentUser.Email</p>
+    }
+</div>
+
+<div class="card" style="margin-top: 2rem;">
+    <h3>Change Password</h3>
+
+    <EditForm Model="passwordModel" OnValidSubmit="HandleChangePassword" FormName="changePassword">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="text-danger" />
+
+        <div class="form-group">
+            <label for="currentPassword">Current Password</label>
+            <InputText id="currentPassword" @bind-Value="passwordModel.CurrentPassword" type="password" class="form-control" />
+            <ValidationMessage For="() => passwordModel.CurrentPassword" />
+        </div>
+
+        <div class="form-group">
+            <label for="newPassword">New Password</label>
+            <InputText id="newPassword" @bind-Value="passwordModel.NewPassword" type="password" class="form-control" />
+            <ValidationMessage For="() => passwordModel.NewPassword" />
+        </div>
+
+        <div class="form-group">
+            <label for="confirmNewPassword">Confirm New Password</label>
+            <InputText id="confirmNewPassword" @bind-Value="passwordModel.ConfirmNewPassword" type="password" class="form-control" />
+            <ValidationMessage For="() => passwordModel.ConfirmNewPassword" />
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@isProcessing">
+            @if (isProcessing)
+            {
+                <span>Changing...</span>
+            }
+            else
+            {
+                <span>Change Password</span>
+            }
+        </button>
+    </EditForm>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private UsernameModel usernameModel { get; set; } = new();
+
+    [SupplyParameterFromForm]
+    private PasswordModel passwordModel { get; set; } = new();
+
+    private ApplicationUser? currentUser;
+    private string? errorMessage;
+    private string? successMessage;
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        usernameModel ??= new();
+        passwordModel ??= new();
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userId = authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (userId != null)
+        {
+            currentUser = await UserManager.FindByIdAsync(userId);
+
+            // Pre-fill the username field with current username
+            if (currentUser != null)
+            {
+                usernameModel.UserName = currentUser.UserName ?? string.Empty;
+            }
+        }
+    }
+
+    private async Task HandleUpdateUsername()
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            if (currentUser == null)
+            {
+                errorMessage = "User not found";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(usernameModel.UserName))
+            {
+                errorMessage = "Username cannot be empty";
+                return;
+            }
+
+            if (usernameModel.UserName == currentUser.UserName)
+            {
+                errorMessage = "New username is the same as the current username";
+                return;
+            }
+
+            // Check if username already exists
+            var existingUser = await UserManager.FindByNameAsync(usernameModel.UserName);
+            if (existingUser != null)
+            {
+                errorMessage = "Username is already taken. Please choose a different username.";
+                return;
+            }
+
+            var result = await UserManager.SetUserNameAsync(currentUser, usernameModel.UserName);
+
+            if (result.Succeeded)
+            {
+                successMessage = "Username updated successfully!";
+
+                // Refresh sign-in to update the username in the claims
+                await SignInManager.RefreshSignInAsync(currentUser);
+
+                // Reload user
+                currentUser = await UserManager.FindByIdAsync(currentUser.Id);
+                usernameModel.UserName = currentUser.UserName ?? string.Empty;
+            }
+            else
+            {
+                errorMessage = string.Join(", ", result.Errors.Select(e => e.Description));
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error updating username: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task HandleChangePassword()
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            if (currentUser == null)
+            {
+                errorMessage = "User not found";
+                return;
+            }
+
+            var result = await UserManager.ChangePasswordAsync(
+                currentUser,
+                passwordModel.CurrentPassword,
+                passwordModel.NewPassword);
+
+            if (result.Succeeded)
+            {
+                successMessage = "Password changed successfully!";
+                passwordModel = new();
+
+                // Sign in again to refresh the security stamp
+                await SignInManager.RefreshSignInAsync(currentUser);
+            }
+            else
+            {
+                errorMessage = string.Join(", ", result.Errors.Select(e => e.Description));
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error changing password: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    public class UsernameModel
+    {
+        [Required]
+        [StringLength(50, MinimumLength = 3, ErrorMessage = "Username must be between 3 and 50 characters")]
+        [RegularExpression(@"^[a-zA-Z0-9_]+$", ErrorMessage = "Username can only contain letters, numbers, and underscores")]
+        public string UserName { get; set; } = string.Empty;
+    }
+
+    public class PasswordModel
+    {
+        [Required]
+        public string CurrentPassword { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(100, MinimumLength = 6)]
+        public string NewPassword { get; set; } = string.Empty;
+
+        [Required]
+        [Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match")]
+        public string ConfirmNewPassword { get; set; } = string.Empty;
+    }
+}

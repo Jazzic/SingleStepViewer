@@ -100,9 +100,10 @@ try
     {
         app.UseExceptionHandler("/Error");
         app.UseHsts();
+        // Only redirect to HTTPS in production
+        app.UseHttpsRedirection();
     }
 
-    app.UseHttpsRedirection();
     app.UseStaticFiles();
 
     app.UseAuthentication();
@@ -172,15 +173,16 @@ static async Task EnsureRolesAsync(RoleManager<IdentityRole> roleManager)
 
 static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager)
 {
+    const string adminUsername = "admin";
     const string adminEmail = "admin@singlestep.local";
     const string adminPassword = "Admin123!";
 
-    var adminUser = await userManager.FindByEmailAsync(adminEmail);
+    var adminUser = await userManager.FindByNameAsync(adminUsername);
     if (adminUser == null)
     {
         adminUser = new ApplicationUser
         {
-            UserName = adminEmail,
+            UserName = adminUsername,
             Email = adminEmail,
             EmailConfirmed = true
         };
@@ -189,7 +191,7 @@ static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager)
         if (result.Succeeded)
         {
             await userManager.AddToRoleAsync(adminUser, "Admin");
-            Log.Information("Default admin user created: {Email} / {Password}", adminEmail, adminPassword);
+            Log.Information("Default admin user created - Username: {Username}, Email: {Email}, Password: {Password}", adminUsername, adminEmail, adminPassword);
         }
         else
         {
