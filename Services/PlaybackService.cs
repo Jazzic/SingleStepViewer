@@ -212,13 +212,10 @@ public class PlaybackService : IPlaybackService, IDisposable
 
             if (_mediaPlayer?.IsPlaying == true)
             {
-                _mediaPlayer.Stop();
+                _mediaPlayer.Stop(); // EndReached will fire and the engine will advance
             }
+
             _currentFilePath = null;
-
-            // Trigger MediaEnded event to signal the playback engine to move to next video
-            MediaEnded?.Invoke(this, EventArgs.Empty);
-
             return Task.CompletedTask;
         }
         catch (Exception ex)
