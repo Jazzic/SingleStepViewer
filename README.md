@@ -2,6 +2,12 @@
 
 A web-based video playback system where multiple users manage playlists via a web interface, with videos played automatically on a dedicated big-screen PC using VLC. The system intelligently balances video priority with fairness across users.
 
+## ✅ Disclaimer
+SingleStepViewer is purely wibecoded!!! Now you have been warned!
+
+## ✅ Why the h3ll is it called SingleStepViewer
+SingleStepViewer was written for a tiny computer party called "SingleStep" :-)
+
 ## ✅ Implementation Status
 
 ### Fully Implemented Features
@@ -31,7 +37,7 @@ A web-based video playback system where multiple users manage playlists via a we
 
 ```bash
 # 1. Clone or navigate to the project directory
-cd C:\Users\jespe\source\repos\SingleStepViewer
+cd C:\Users\username\source\repos\SingleStepViewer
 
 # 2. Restore packages (if needed)
 dotnet restore
