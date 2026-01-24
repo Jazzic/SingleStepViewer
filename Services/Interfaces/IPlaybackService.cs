@@ -13,5 +13,6 @@ public interface IPlaybackService
     bool IsPlaying { get; }
     string? CurrentFilePath { get; }
     event EventHandler? MediaEnded;
+    event EventHandler? MediaSkipped;
     event EventHandler<string>? MediaError;
 }

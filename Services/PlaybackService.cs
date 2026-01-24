@@ -26,6 +26,7 @@ public class PlaybackService : IPlaybackService, IDisposable
     public string? CurrentFilePath => _currentFilePath;
 
     public event EventHandler? MediaEnded;
+    public event EventHandler? MediaSkipped;
     public event EventHandler<string>? MediaError;
 
     public Task InitializeAsync()
@@ -212,10 +213,14 @@ public class PlaybackService : IPlaybackService, IDisposable
 
             if (_mediaPlayer?.IsPlaying == true)
             {
-                _mediaPlayer.Stop(); // EndReached will fire and the engine will advance
+                _mediaPlayer.Stop();
             }
 
             _currentFilePath = null;
+
+            // Skip is explicit; do NOT treat as natural end
+            MediaSkipped?.Invoke(this, EventArgs.Empty);
+
             return Task.CompletedTask;
         }
         catch (Exception ex)

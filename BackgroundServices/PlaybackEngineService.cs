@@ -18,6 +18,10 @@ public class PlaybackEngineService : BackgroundService
     private readonly SchedulingOptions _schedulingOptions;
     private PlaylistItem? _currentVideo;
 
+    private readonly object _mediaEndedLock = new();
+    private int? _mediaEndedHandledForVideoId;
+    private readonly SemaphoreSlim _transitionLock = new(1, 1);
+
     public PlaybackEngineService(
         IServiceProvider serviceProvider,
         IPlaybackService playbackService,
@@ -43,6 +47,7 @@ public class PlaybackEngineService : BackgroundService
 
             // Subscribe to playback events
             _playbackService.MediaEnded += OnMediaEnded;
+            _playbackService.MediaSkipped += OnMediaSkipped;
             _playbackService.MediaError += OnMediaError;
 
             _logger.LogInformation("Playback service initialized, starting main loop");
@@ -83,6 +88,7 @@ public class PlaybackEngineService : BackgroundService
         finally
         {
             _playbackService.MediaEnded -= OnMediaEnded;
+            _playbackService.MediaSkipped -= OnMediaSkipped;
             _playbackService.MediaError -= OnMediaError;
             _logger.LogInformation("Playback Engine Service stopped");
         }
@@ -152,6 +158,13 @@ public class PlaybackEngineService : BackgroundService
 
             // Start playback
             _currentVideo = nextVideo;
+
+            // New video => reset de-dupe latch
+            lock (_mediaEndedLock)
+            {
+                _mediaEndedHandledForVideoId = null;
+            }
+
             await _playbackService.PlayAsync(nextVideo.LocalFilePath);
         }
         catch (Exception ex)
@@ -160,86 +173,65 @@ public class PlaybackEngineService : BackgroundService
         }
     }
 
+    private async void OnMediaSkipped(object? sender, EventArgs e)
+    {
+        await HandleTransitionAsync(success: true, errorMessage: null, reason: "skipped");
+    }
+
     private async void OnMediaEnded(object? sender, EventArgs e)
     {
+        await HandleTransitionAsync(success: true, errorMessage: null, reason: "ended");
+    }
+
+    private async Task HandleTransitionAsync(bool success, string? errorMessage, string reason)
+    {
+        if (!await _transitionLock.WaitAsync(0))
+        {
+            _logger.LogDebug("Ignoring {Reason} transition because another transition is in progress", reason);
+            return;
+        }
+
         try
         {
             if (_currentVideo == null)
             {
-                _logger.LogWarning("Media ended but no current video tracked");
+                _logger.LogWarning("{Reason} but no current video tracked", reason);
                 return;
             }
 
-            _logger.LogInformation(
-                "Video {VideoId} playback completed successfully",
-                _currentVideo.Id);
+            var finished = _currentVideo;
+
+            _logger.LogInformation("Finalizing current video {VideoId} ({Reason})", finished.Id, reason);
 
             using var scope = _serviceProvider.CreateScope();
             var queueManager = scope.ServiceProvider.GetRequiredService<IQueueManager>();
 
-            // Mark as played
             await queueManager.MarkVideoAsPlayedAsync(
-                _currentVideo.Id,
-                _currentVideo.Playlist.UserId,
-                success: true);
+                finished.Id,
+                finished.Playlist.UserId,
+                success: success,
+                errorMessage: errorMessage);
 
-            // Broadcast to all clients
-            _logger.LogInformation("Broadcasting VideoEnded event for video {VideoId}", _currentVideo.Id);
-            await _hubContext.Clients.All.SendAsync("VideoEnded", _currentVideo.Id);
-            _logger.LogInformation("Broadcasting QueueUpdated event after video ended");
+            await _hubContext.Clients.All.SendAsync("VideoEnded", finished.Id);
             await _hubContext.Clients.All.SendAsync("QueueUpdated");
 
             _currentVideo = null;
 
-            // Immediately check for next video
             await CheckAndPlayNextVideoAsync();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling media ended event");
+            _logger.LogError(ex, "Error handling {Reason} transition", reason);
+        }
+        finally
+        {
+            _transitionLock.Release();
         }
     }
 
     private async void OnMediaError(object? sender, string errorMessage)
     {
-        try
-        {
-            if (_currentVideo == null)
-            {
-                _logger.LogWarning("Media error but no current video tracked");
-                return;
-            }
-
-            _logger.LogError(
-                "Video {VideoId} playback failed: {Error}",
-                _currentVideo.Id,
-                errorMessage);
-
-            using var scope = _serviceProvider.CreateScope();
-            var queueManager = scope.ServiceProvider.GetRequiredService<IQueueManager>();
-
-            // Mark as error
-            await queueManager.MarkVideoAsPlayedAsync(
-                _currentVideo.Id,
-                _currentVideo.Playlist.UserId,
-                success: false,
-                errorMessage: errorMessage);
-
-            // Broadcast to all clients
-            _logger.LogInformation("Broadcasting VideoError event for video {VideoId}", _currentVideo.Id);
-            await _hubContext.Clients.All.SendAsync("VideoError", _currentVideo.Id, errorMessage);
-            _logger.LogInformation("Broadcasting QueueUpdated event after video error");
-            await _hubContext.Clients.All.SendAsync("QueueUpdated");
-
-            _currentVideo = null;
-
-            // Try next video
-            await CheckAndPlayNextVideoAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling media error event");
-        }
+        await HandleTransitionAsync(success: false, errorMessage: errorMessage, reason: "error");
     }
 
     private async Task ResetStuckVideosAsync()
