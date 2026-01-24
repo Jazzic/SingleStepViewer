@@ -23,6 +23,7 @@ public class PlaybackService : IPlaybackService, IDisposable
     }
 
     public bool IsPlaying => _mediaPlayer?.IsPlaying ?? false;
+    public bool IsPaused => _mediaPlayer?.State == LibVLCSharp.Shared.VLCState.Paused;
     public string? CurrentFilePath => _currentFilePath;
 
     public event EventHandler? MediaEnded;

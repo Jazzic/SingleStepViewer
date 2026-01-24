@@ -57,6 +57,16 @@
                             <span class="stat-value priority-@currentVideo.Priority">@currentVideo.Priority</span>
                         </div>
                         <div class="playback-controls">
+                            <button class="btn btn-secondary" @onclick="TogglePause" disabled="@isProcessing">
+                                @if (isPaused)
+                                {
+                                    <span>▶️ Resume</span>
+                                }
+                                else
+                                {
+                                    <span>⏸️ Pause</span>
+                                }
+                            </button>
                             <button class="btn btn-primary" @onclick="RestartVideo" disabled="@isProcessing">
                                 🔄 Restart
                             </button>
@@ -153,6 +163,7 @@
     private int playedCount;
     private bool isLoading = true;
     private bool isProcessing = false;
+    private bool isPaused = false;
     private string? errorMessage;
     private string? successMessage;
 
@@ -259,6 +270,9 @@
             // Get upcoming videos
             upcomingVideos = await QueueManager.GetUpcomingVideosAsync(50);
 
+            // Sync pause state
+            isPaused = PlaybackService.IsPaused;
+
             // Get statistics
             pendingCount = await DbContext.PlaylistItems
                 .AsNoTracking()
@@ -325,6 +339,44 @@
         catch (Exception ex)
         {
             errorMessage = $"Error skipping video: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task TogglePause()
+    {
+        try
+        {
+            isProcessing = true;
+            errorMessage = null;
+            successMessage = null;
+
+            if (isPaused)
+            {
+                await PlaybackService.ResumeAsync();
+                isPaused = false;
+                successMessage = "Video resumed!";
+            }
+            else
+            {
+                await PlaybackService.PauseAsync();
+                isPaused = true;
+                successMessage = "Video paused!";
+            }
+
+            // Clear message after 2 seconds
+            _ = Task.Delay(2000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                successMessage = null;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error toggling pause: {ex.Message}";
         }
         finally
         {

@@ -11,6 +11,7 @@ public interface IPlaybackService
     Task SkipAsync();
     Task SetVolumeAsync(int volume);
     bool IsPlaying { get; }
+    bool IsPaused { get; }
     string? CurrentFilePath { get; }
     event EventHandler? MediaEnded;
     event EventHandler? MediaSkipped;
