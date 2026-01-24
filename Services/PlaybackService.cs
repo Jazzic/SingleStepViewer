@@ -111,28 +111,50 @@ public class PlaybackService : IPlaybackService, IDisposable
             }
 
             _logger.LogInformation("Playing video: {FilePath}", filePath);
+            _logger.LogDebug("VLC state before stop: IsPlaying={IsPlaying}, State={State}",
+                _mediaPlayer.IsPlaying, _mediaPlayer.State);
 
-            // Stop any currently playing media
-            if (_mediaPlayer.IsPlaying)
-            {
-                await StopAsync();
-            }
+            // Always stop and reset the media player before starting a new video
+            // This is important after MediaEnded fires - the player needs to be reset
+            _mediaPlayer.Stop();
+            await Task.Delay(200); // Give VLC time to fully stop and reset
 
-            // Create and play media
-            using var media = new Media(_libVlc, filePath, FromType.FromPath);
-            _mediaPlayer.Play(media);
+            _logger.LogDebug("VLC state after stop: IsPlaying={IsPlaying}, State={State}",
+                _mediaPlayer.IsPlaying, _mediaPlayer.State);
+
+            // Create and play media (don't use 'using' - VLC manages the media lifecycle)
+            _logger.LogDebug("Creating media object for: {FilePath}", filePath);
+            var media = new Media(_libVlc, filePath, FromType.FromPath);
+
+            _logger.LogDebug("Calling _mediaPlayer.Play(media)");
+            var playResult = _mediaPlayer.Play(media);
+            _logger.LogDebug("Play() returned: {PlayResult}", playResult);
+
             _currentFilePath = filePath;
 
-            // Wait a bit to ensure playback starts
-            await Task.Delay(100);
+            // Wait for playback to start (up to 2 seconds)
+            var startTime = DateTime.UtcNow;
+            var iteration = 0;
+            while (!_mediaPlayer.IsPlaying && (DateTime.UtcNow - startTime).TotalMilliseconds < 2000)
+            {
+                await Task.Delay(50);
+                iteration++;
+                if (iteration % 10 == 0) // Log every 500ms
+                {
+                    _logger.LogDebug("Waiting for playback... iteration={Iteration}, State={State}, IsPlaying={IsPlaying}",
+                        iteration, _mediaPlayer.State, _mediaPlayer.IsPlaying);
+                }
+            }
 
+            var elapsed = (DateTime.UtcNow - startTime).TotalMilliseconds;
             if (_mediaPlayer.IsPlaying)
             {
-                _logger.LogInformation("Video playback started successfully");
+                _logger.LogInformation("Video playback started successfully after {Elapsed}ms", elapsed);
             }
             else
             {
-                _logger.LogWarning("Video playback may not have started");
+                _logger.LogWarning("Video playback did NOT start after {Elapsed}ms. State={State}, IsPlaying={IsPlaying}",
+                    elapsed, _mediaPlayer.State, _mediaPlayer.IsPlaying);
             }
         }
         catch (Exception ex)
@@ -345,8 +367,18 @@ public class PlaybackService : IPlaybackService, IDisposable
             return;
         }
 
-        _logger.LogInformation("Media playback ended");
-        MediaEnded?.Invoke(this, EventArgs.Empty);
+        // Log VLC state when media ends - this fires from VLC's native thread
+        _logger.LogInformation("Media playback ended - VLC State: {State}, IsPlaying: {IsPlaying}, File: {File}",
+            _mediaPlayer?.State, _mediaPlayer?.IsPlaying, _currentFilePath);
+
+        // IMPORTANT: VLC EndReached fires from VLC's native thread
+        // Calling VLC methods directly from this callback can cause deadlocks
+        // Post the event to a different thread context
+        Task.Run(() =>
+        {
+            _logger.LogDebug("Invoking MediaEnded event from background task");
+            MediaEnded?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     private void OnMediaError(object? sender, EventArgs e)
@@ -358,9 +390,18 @@ public class PlaybackService : IPlaybackService, IDisposable
             return;
         }
 
+        // Log VLC state when error occurs
+        _logger.LogError("VLC encountered an error - State: {State}, IsPlaying: {IsPlaying}, File: {File}",
+            _mediaPlayer?.State, _mediaPlayer?.IsPlaying, _currentFilePath);
+
         var errorMessage = "VLC encountered an error during playback";
-        _logger.LogError(errorMessage);
-        MediaError?.Invoke(this, errorMessage);
+
+        // Post to background thread to avoid VLC callback issues
+        Task.Run(() =>
+        {
+            _logger.LogDebug("Invoking MediaError event from background task");
+            MediaError?.Invoke(this, errorMessage);
+        });
     }
 
     public void Dispose()

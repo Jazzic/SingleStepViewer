@@ -96,6 +96,9 @@ public class PlaybackEngineService : BackgroundService
 
     private async Task CheckAndPlayNextVideoAsync()
     {
+        _logger.LogDebug("CheckAndPlayNextVideoAsync starting - IsPlaying={IsPlaying}, CurrentVideo={CurrentVideoId}",
+            _playbackService.IsPlaying, _currentVideo?.Id);
+
         try
         {
             using var scope = _serviceProvider.CreateScope();
@@ -103,6 +106,7 @@ public class PlaybackEngineService : BackgroundService
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             // Get next video from queue
+            _logger.LogDebug("Calling GetNextVideoAsync");
             var nextVideo = await queueManager.GetNextVideoAsync();
 
             if (nextVideo == null)
@@ -110,6 +114,8 @@ public class PlaybackEngineService : BackgroundService
                 _logger.LogDebug("No videos in queue");
                 return;
             }
+
+            _logger.LogDebug("Got next video from queue: {VideoId} - {Title}", nextVideo.Id, nextVideo.Title);
 
             if (string.IsNullOrEmpty(nextVideo.LocalFilePath) || !File.Exists(nextVideo.LocalFilePath))
             {
@@ -165,7 +171,10 @@ public class PlaybackEngineService : BackgroundService
                 _mediaEndedHandledForVideoId = null;
             }
 
+            _logger.LogDebug("Calling PlayAsync for video {VideoId}: {FilePath}", nextVideo.Id, nextVideo.LocalFilePath);
             await _playbackService.PlayAsync(nextVideo.LocalFilePath);
+            _logger.LogDebug("PlayAsync completed for video {VideoId}, IsPlaying={IsPlaying}",
+                nextVideo.Id, _playbackService.IsPlaying);
         }
         catch (Exception ex)
         {
@@ -180,16 +189,21 @@ public class PlaybackEngineService : BackgroundService
 
     private async void OnMediaEnded(object? sender, EventArgs e)
     {
+        _logger.LogDebug("OnMediaEnded event received from PlaybackService");
         await HandleTransitionAsync(success: true, errorMessage: null, reason: "ended");
     }
 
     private async Task HandleTransitionAsync(bool success, string? errorMessage, string reason)
     {
+        _logger.LogDebug("HandleTransitionAsync called with reason={Reason}, success={Success}", reason, success);
+
         if (!await _transitionLock.WaitAsync(0))
         {
             _logger.LogDebug("Ignoring {Reason} transition because another transition is in progress", reason);
             return;
         }
+
+        _logger.LogDebug("Acquired transition lock for {Reason}", reason);
 
         try
         {
@@ -206,18 +220,26 @@ public class PlaybackEngineService : BackgroundService
             using var scope = _serviceProvider.CreateScope();
             var queueManager = scope.ServiceProvider.GetRequiredService<IQueueManager>();
 
+            _logger.LogDebug("Calling MarkVideoAsPlayedAsync for video {VideoId}", finished.Id);
             await queueManager.MarkVideoAsPlayedAsync(
                 finished.Id,
                 finished.Playlist.UserId,
                 success: success,
                 errorMessage: errorMessage);
 
+            _logger.LogDebug("Broadcasting VideoEnded and QueueUpdated events");
             await _hubContext.Clients.All.SendAsync("VideoEnded", finished.Id);
             await _hubContext.Clients.All.SendAsync("QueueUpdated");
 
             _currentVideo = null;
 
+            // Give VLC a moment to fully clean up after EndReached before starting next video
+            _logger.LogDebug("Waiting 300ms for VLC to clean up before starting next video");
+            await Task.Delay(300);
+
+            _logger.LogDebug("Calling CheckAndPlayNextVideoAsync from HandleTransitionAsync");
             await CheckAndPlayNextVideoAsync();
+            _logger.LogDebug("CheckAndPlayNextVideoAsync completed");
         }
         catch (Exception ex)
         {
@@ -225,6 +247,7 @@ public class PlaybackEngineService : BackgroundService
         }
         finally
         {
+            _logger.LogDebug("Releasing transition lock for {Reason}", reason);
             _transitionLock.Release();
         }
     }
