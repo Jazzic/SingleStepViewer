@@ -32,6 +32,12 @@ SingleStepViewer was written for a tiny computer party called "SingleStep" :-)
    - Place `yt-dlp.exe` in PATH or update `appsettings.json` with full path
 3. **VLC Media Player** - [Download here](https://www.videolan.org/vlc/)
    - Install to default location: `C:\Program Files\VideoLAN\VLC`
+4. **ffmpeg** - Required for merging video+audio streams (enables 1080p+ quality)
+   - Install via winget: `winget install ffmpeg`
+   - Or download from [ffmpeg.org](https://ffmpeg.org/download.html)
+5. **Node.js** - Required for yt-dlp to download YouTube videos in original quality
+   - Install via winget: `winget install OpenJS.NodeJS`
+   - Or download from [nodejs.org](https://nodejs.org/)
 
 ### Installation Steps
 
@@ -138,9 +144,12 @@ Adjust weights to change the balance between priority and fairness.
   "StoragePath": "./videos",
   "MaxConcurrentDownloads": 2,
   "YtDlpPath": "yt-dlp.exe",
-  "PreferredFormat": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+  "PreferredFormat": "bestvideo+bestaudio/best",
+  "AdditionalArguments": "--js-runtimes node"
 }
 ```
+
+**Note:** The format `bestvideo+bestaudio` downloads the highest quality video and audio streams separately, then merges them using ffmpeg. This enables 1080p, 1440p, and 4K downloads. The `--js-runtimes node` flag allows yt-dlp to use Node.js for better YouTube extraction.
 
 ## Architecture
 
@@ -298,6 +307,12 @@ Log levels:
 - Verify video URL is supported by yt-dlp
 - Check storage path exists and is writable
 - View error message in video status
+
+### "Videos downloading in low quality"
+- Ensure ffmpeg is installed: `ffmpeg -version`
+- Ensure Node.js is installed: `node --version`
+- Without ffmpeg, only pre-merged formats are available (typically 720p max)
+- Without Node.js, yt-dlp may fail to extract highest quality streams from YouTube
 
 ### "Queue not updating"
 - Ensure SignalR connection is established (check browser console)
