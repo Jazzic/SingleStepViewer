@@ -69,18 +69,35 @@ public class PlaybackService : IPlaybackService, IDisposable
                 _logger.LogInformation("Video output disabled (development mode)");
             }
 
-            _libVlc = new LibVLC(options.ToArray());
-            _mediaPlayer = new MediaPlayer(_libVlc);
+            LibVLC? tempLibVlc = null;
+            MediaPlayer? tempMediaPlayer = null;
+            
+            try
+            {
+                tempLibVlc = new LibVLC(options.ToArray());
+                tempMediaPlayer = new MediaPlayer(tempLibVlc);
 
-            // Set volume
-            _mediaPlayer.Volume = _playbackOptions.DefaultVolume;
+                // Set volume
+                tempMediaPlayer.Volume = _playbackOptions.DefaultVolume;
 
-            // Subscribe to events
-            _mediaPlayer.EndReached += OnMediaEnded;
-            _mediaPlayer.EncounteredError += OnMediaError;
+                // Subscribe to events
+                tempMediaPlayer.EndReached += OnMediaEnded;
+                tempMediaPlayer.EncounteredError += OnMediaError;
 
-            _isInitialized = true;
-            _logger.LogInformation("LibVLC initialized successfully");
+                // Success - assign to fields
+                _libVlc = tempLibVlc;
+                _mediaPlayer = tempMediaPlayer;
+                
+                _isInitialized = true;
+                _logger.LogInformation("LibVLC initialized successfully");
+            }
+            catch
+            {
+                // Clean up on failure
+                tempMediaPlayer?.Dispose();
+                tempLibVlc?.Dispose();
+                throw;
+            }
 
             return Task.CompletedTask;
         }

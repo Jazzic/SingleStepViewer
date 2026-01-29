@@ -215,8 +215,22 @@ public class VideoDownloaderService : BackgroundService
         var invalid = Path.GetInvalidFileNameChars();
         var safe = new string(fileName.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
 
-        // Trim and limit length
-        safe = safe.Trim().Substring(0, Math.Min(safe.Length, 100));
+        // Remove path separators to prevent path traversal attacks
+        safe = safe.Replace('/', '_').Replace('\\', '_');
+
+        // Trim whitespace
+        safe = safe.Trim();
+        
+        // If empty or too short after sanitization, use default name
+        if (string.IsNullOrWhiteSpace(safe) || safe.Length < 3)
+        {
+            safe = "video";
+        }
+        else
+        {
+            // Limit length
+            safe = safe.Substring(0, Math.Min(safe.Length, 100));
+        }
 
         // Add timestamp to ensure uniqueness
         return $"{safe}_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
