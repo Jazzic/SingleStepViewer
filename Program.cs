@@ -36,6 +36,7 @@ try
     builder.Services.Configure<PlaybackOptions>(builder.Configuration.GetSection(PlaybackOptions.SectionName));
     builder.Services.Configure<SchedulingOptions>(builder.Configuration.GetSection(SchedulingOptions.SectionName));
     builder.Services.Configure<VideoOptions>(builder.Configuration.GetSection(VideoOptions.SectionName));
+    builder.Services.Configure<AdminUserOptions>(builder.Configuration.GetSection(AdminUserOptions.SectionName));
 
     // Add database
     builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -135,14 +136,31 @@ try
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
         await EnsureRolesAsync(roleManager);
-        await EnsureAdminUserAsync(userManager, dbContext);
+        await EnsureAdminUserAsync(userManager, dbContext, scope.ServiceProvider.GetRequiredService<IConfiguration>());
     }
 
-    // Ensure video storage directory exists
+    // Validate required dependencies and configuration
+    ValidateConfiguration(app.Services, builder.Configuration);
+
+    // Ensure video storage directory exists and is writable
     var videoOptions = builder.Configuration.GetSection(VideoOptions.SectionName).Get<VideoOptions>();
     if (videoOptions != null && !string.IsNullOrEmpty(videoOptions.StoragePath))
     {
         Directory.CreateDirectory(videoOptions.StoragePath);
+        
+        // Test write permissions
+        var testFile = Path.Combine(videoOptions.StoragePath, $".write_test_{Guid.NewGuid()}.tmp");
+        try
+        {
+            File.WriteAllText(testFile, "test");
+            File.Delete(testFile);
+            Log.Information("Video storage path validated: {StoragePath}", videoOptions.StoragePath);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Video storage path is not writable: {StoragePath}", videoOptions.StoragePath);
+            throw new InvalidOperationException($"Video storage path is not writable: {videoOptions.StoragePath}", ex);
+        }
     }
 
     Log.Information("SingleStepViewer web application started successfully");
@@ -171,11 +189,15 @@ static async Task EnsureRolesAsync(RoleManager<IdentityRole> roleManager)
     }
 }
 
-static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager, ApplicationDbContext dbContext)
+static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager, ApplicationDbContext dbContext, IConfiguration configuration)
 {
-    const string adminUsername = "admin";
-    const string adminEmail = "admin@singlestep.local";
-    const string adminPassword = "Admin123!";
+    // Get admin user configuration
+    var adminConfig = configuration.GetSection(AdminUserOptions.SectionName).Get<AdminUserOptions>() 
+        ?? new AdminUserOptions();
+    
+    var adminUsername = adminConfig.Username;
+    var adminEmail = adminConfig.Email;
+    var adminPassword = adminConfig.Password;
 
     // Check for admin user (respects soft delete filter)
     var adminUser = await userManager.FindByNameAsync(adminUsername);
@@ -209,7 +231,7 @@ static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager,
             if (result.Succeeded)
             {
                 await userManager.AddToRoleAsync(adminUser, "Admin");
-                Log.Information("Default admin user created - Username: {Username}, Email: {Email}, Password: {Password}", adminUsername, adminEmail, adminPassword);
+                Log.Information("Default admin user created - Username: {Username}, Email: {Email}", adminUsername, adminEmail);
             }
             else
             {
@@ -217,4 +239,91 @@ static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager,
             }
         }
     }
+}
+
+static void ValidateConfiguration(IServiceProvider services, IConfiguration configuration)
+{
+    var errors = new List<string>();
+    
+    // Validate connection string
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        errors.Add("ConnectionStrings:DefaultConnection is not configured");
+    }
+    
+    // Validate video options
+    var videoOptions = configuration.GetSection(VideoOptions.SectionName).Get<VideoOptions>();
+    if (videoOptions != null)
+    {
+        // Check yt-dlp executable
+        if (string.IsNullOrEmpty(videoOptions.YtDlpPath))
+        {
+            errors.Add("Video:YtDlpPath is not configured");
+        }
+        else
+        {
+            // Check if yt-dlp exists (either as full path or in PATH)
+            var ytDlpExists = File.Exists(videoOptions.YtDlpPath);
+            if (!ytDlpExists)
+            {
+                // Try to find it in PATH
+                var pathVar = Environment.GetEnvironmentVariable("PATH");
+                if (pathVar != null)
+                {
+                    var paths = pathVar.Split(Path.PathSeparator);
+                    foreach (var path in paths)
+                    {
+                        var fullPath = Path.Combine(path, videoOptions.YtDlpPath);
+                        if (File.Exists(fullPath) || File.Exists(fullPath + ".exe"))
+                        {
+                            ytDlpExists = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (!ytDlpExists)
+            {
+                Log.Warning("yt-dlp executable not found at '{YtDlpPath}'. Video downloads will fail until yt-dlp is installed.", videoOptions.YtDlpPath);
+            }
+            else
+            {
+                Log.Information("yt-dlp executable validated: {YtDlpPath}", videoOptions.YtDlpPath);
+            }
+        }
+        
+        if (string.IsNullOrEmpty(videoOptions.StoragePath))
+        {
+            errors.Add("Video:StoragePath is not configured");
+        }
+    }
+    
+    // Validate playback options
+    var playbackOptions = configuration.GetSection(PlaybackOptions.SectionName).Get<PlaybackOptions>();
+    if (playbackOptions != null)
+    {
+        if (string.IsNullOrEmpty(playbackOptions.VlcPath))
+        {
+            errors.Add("Playback:VlcPath is not configured");
+        }
+        else if (!Directory.Exists(playbackOptions.VlcPath))
+        {
+            Log.Warning("VLC directory not found at '{VlcPath}'. Video playback will fail until VLC is installed.", playbackOptions.VlcPath);
+        }
+        else
+        {
+            Log.Information("VLC directory validated: {VlcPath}", playbackOptions.VlcPath);
+        }
+    }
+    
+    if (errors.Count > 0)
+    {
+        var errorMessage = "Configuration validation failed:\n" + string.Join("\n", errors);
+        Log.Error(errorMessage);
+        throw new InvalidOperationException(errorMessage);
+    }
+    
+    Log.Information("Configuration validation completed successfully");
 }

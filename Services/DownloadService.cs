@@ -35,47 +35,57 @@ public class DownloadService : IDownloadService
                 Path.GetFileNameWithoutExtension(outputPath)
             );
 
-            // Build arguments
-            var arguments = $"-o \"{outputTemplate}.%(ext)s\" --no-playlist";
-
-            // Enable Android client for YouTube extraction (avoids PO Token requirements)
-            arguments += " --extractor-args \"youtube:player_client=android,web\"";
-
-            // Add cookies if configured
-            if (!string.IsNullOrEmpty(_videoOptions.CookiesFilePath) && File.Exists(_videoOptions.CookiesFilePath))
-            {
-                arguments += $" --cookies \"{_videoOptions.CookiesFilePath}\"";
-            }
-
-            // Format preference - prefer pre-combined formats (no merging needed)
-            if (!string.IsNullOrEmpty(_videoOptions.PreferredFormat))
-            {
-                arguments += $" -f \"{_videoOptions.PreferredFormat}\"";
-            }
-            else
-            {
-                // Default to best quality single file (already has video+audio combined)
-                arguments += " -f \"best[ext=mp4]/best\"";
-            }
-
-            // Add any additional user-specified arguments
-            if (!string.IsNullOrEmpty(_videoOptions.AdditionalArguments))
-            {
-                arguments += $" {_videoOptions.AdditionalArguments}";
-            }
-
-            // Add video URL
-            arguments += $" \"{videoUrl}\"";
-
+            // Build arguments using ArgumentList to prevent command injection
             var startInfo = new ProcessStartInfo
             {
                 FileName = _videoOptions.YtDlpPath,
-                Arguments = arguments,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // Add arguments safely using ArgumentList
+            startInfo.ArgumentList.Add("-o");
+            startInfo.ArgumentList.Add($"{outputTemplate}.%(ext)s");
+            startInfo.ArgumentList.Add("--no-playlist");
+
+            // Enable Android client for YouTube extraction (avoids PO Token requirements)
+            startInfo.ArgumentList.Add("--extractor-args");
+            startInfo.ArgumentList.Add("youtube:player_client=android,web");
+
+            // Add cookies if configured
+            if (!string.IsNullOrEmpty(_videoOptions.CookiesFilePath) && File.Exists(_videoOptions.CookiesFilePath))
+            {
+                startInfo.ArgumentList.Add("--cookies");
+                startInfo.ArgumentList.Add(_videoOptions.CookiesFilePath);
+            }
+
+            // Format preference - prefer pre-combined formats (no merging needed)
+            if (!string.IsNullOrEmpty(_videoOptions.PreferredFormat))
+            {
+                startInfo.ArgumentList.Add("-f");
+                startInfo.ArgumentList.Add(_videoOptions.PreferredFormat);
+            }
+            else
+            {
+                // Default to best quality single file (already has video+audio combined)
+                startInfo.ArgumentList.Add("-f");
+                startInfo.ArgumentList.Add("best[ext=mp4]/best");
+            }
+
+            // Add any additional user-specified arguments (split on spaces for safety)
+            if (!string.IsNullOrEmpty(_videoOptions.AdditionalArguments))
+            {
+                var additionalArgs = _videoOptions.AdditionalArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var arg in additionalArgs)
+                {
+                    startInfo.ArgumentList.Add(arg);
+                }
+            }
+
+            // Add video URL (this is user-controlled, so using ArgumentList prevents injection)
+            startInfo.ArgumentList.Add(videoUrl);
 
             using var process = new Process { StartInfo = startInfo };
 

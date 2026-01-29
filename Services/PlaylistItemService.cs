@@ -55,8 +55,8 @@ public class PlaylistItemService : IPlaylistItemService
 
         _logger.LogInformation("Created playlist item {ItemId} - video will be downloaded in background", item.Id);
 
-        // Try to extract metadata (non-blocking)
-        _ = Task.Run(async () =>
+        // Try to extract metadata (non-blocking) - use proper task handling
+        var metadataTask = Task.Run(async () =>
         {
             try
             {
@@ -78,6 +78,15 @@ public class PlaylistItemService : IPlaylistItemService
                 _logger.LogWarning(ex, "Failed to extract metadata for item {ItemId}", item.Id);
             }
         });
+
+        // Don't wait for metadata extraction, but log any unhandled exceptions
+        _ = metadataTask.ContinueWith(t =>
+        {
+            if (t.IsFaulted && t.Exception != null)
+            {
+                _logger.LogError(t.Exception.GetBaseException(), "Unhandled exception in metadata extraction for item {ItemId}", item.Id);
+            }
+        }, TaskScheduler.Default);
 
         return item;
     }

@@ -215,6 +215,12 @@ public class VideoDownloaderService : BackgroundService
         var invalid = Path.GetInvalidFileNameChars();
         var safe = new string(fileName.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
 
+        // Remove path separators to prevent path traversal attacks
+        safe = safe.Replace('/', '_').Replace('\\', '_');
+        
+        // Use only the filename portion to prevent any path traversal
+        safe = Path.GetFileName(safe);
+
         // Trim and limit length
         safe = safe.Trim().Substring(0, Math.Min(safe.Length, 100));
 
