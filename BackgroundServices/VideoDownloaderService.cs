@@ -217,12 +217,20 @@ public class VideoDownloaderService : BackgroundService
 
         // Remove path separators to prevent path traversal attacks
         safe = safe.Replace('/', '_').Replace('\\', '_');
-        
-        // Use only the filename portion to prevent any path traversal
-        safe = Path.GetFileName(safe);
 
-        // Trim and limit length
-        safe = safe.Trim().Substring(0, Math.Min(safe.Length, 100));
+        // Trim whitespace
+        safe = safe.Trim();
+        
+        // If empty or too short after sanitization, use default name
+        if (string.IsNullOrWhiteSpace(safe) || safe.Length < 3)
+        {
+            safe = "video";
+        }
+        else
+        {
+            // Limit length
+            safe = safe.Substring(0, Math.Min(safe.Length, 100));
+        }
 
         // Add timestamp to ensure uniqueness
         return $"{safe}_{DateTime.UtcNow:yyyyMMdd_HHmmss}";

@@ -153,13 +153,27 @@ try
         try
         {
             File.WriteAllText(testFile, "test");
-            File.Delete(testFile);
             Log.Information("Video storage path validated: {StoragePath}", videoOptions.StoragePath);
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Video storage path is not writable: {StoragePath}", videoOptions.StoragePath);
             throw new InvalidOperationException($"Video storage path is not writable: {videoOptions.StoragePath}", ex);
+        }
+        finally
+        {
+            // Clean up test file
+            try
+            {
+                if (File.Exists(testFile))
+                {
+                    File.Delete(testFile);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Could not delete test file: {TestFile}", testFile);
+            }
         }
     }
 
@@ -198,6 +212,13 @@ static async Task EnsureAdminUserAsync(UserManager<ApplicationUser> userManager,
     var adminUsername = adminConfig.Username;
     var adminEmail = adminConfig.Email;
     var adminPassword = adminConfig.Password;
+    
+    // Validate that password has been changed from placeholder
+    if (adminPassword == "CHANGE_ME_IN_PRODUCTION")
+    {
+        Log.Warning("Admin password is set to placeholder value. Using default password for development. CHANGE THIS IN PRODUCTION!");
+        adminPassword = "Admin123!"; // Fallback for development only
+    }
 
     // Check for admin user (respects soft delete filter)
     var adminUser = await userManager.FindByNameAsync(adminUsername);

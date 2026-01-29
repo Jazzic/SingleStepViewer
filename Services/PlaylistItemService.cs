@@ -10,15 +10,18 @@ public class PlaylistItemService : IPlaylistItemService
     private readonly ApplicationDbContext _context;
     private readonly IVideoService _videoService;
     private readonly ILogger<PlaylistItemService> _logger;
+    private readonly IServiceProvider _serviceProvider;
 
     public PlaylistItemService(
         ApplicationDbContext context,
         IVideoService videoService,
-        ILogger<PlaylistItemService> logger)
+        ILogger<PlaylistItemService> logger,
+        IServiceProvider serviceProvider)
     {
         _context = context;
         _videoService = videoService;
         _logger = logger;
+        _serviceProvider = serviceProvider;
     }
 
     public async Task<PlaylistItem?> GetByIdAsync(int id)
@@ -55,7 +58,10 @@ public class PlaylistItemService : IPlaylistItemService
 
         _logger.LogInformation("Created playlist item {ItemId} - video will be downloaded in background", item.Id);
 
-        // Try to extract metadata (non-blocking) - use proper task handling
+        // Capture the item ID for the background task
+        var itemId = item.Id;
+
+        // Try to extract metadata (non-blocking) - use proper task handling with scoped DbContext
         var metadataTask = Task.Run(async () =>
         {
             try
@@ -63,19 +69,23 @@ public class PlaylistItemService : IPlaylistItemService
                 var metadata = await _videoService.ExtractMetadataAsync(videoUrl);
                 if (metadata != null)
                 {
-                    var itemToUpdate = await _context.PlaylistItems.FindAsync(item.Id);
+                    // Create a new scope to get a fresh DbContext instance (thread-safe)
+                    using var scope = _serviceProvider.CreateScope();
+                    var scopedContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                    
+                    var itemToUpdate = await scopedContext.PlaylistItems.FindAsync(itemId);
                     if (itemToUpdate != null)
                     {
                         itemToUpdate.Title = metadata.Title;
                         itemToUpdate.ThumbnailUrl = metadata.ThumbnailUrl;
                         itemToUpdate.Duration = metadata.Duration;
-                        await _context.SaveChangesAsync();
+                        await scopedContext.SaveChangesAsync();
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to extract metadata for item {ItemId}", item.Id);
+                _logger.LogWarning(ex, "Failed to extract metadata for item {ItemId}", itemId);
             }
         });
 
@@ -84,7 +94,7 @@ public class PlaylistItemService : IPlaylistItemService
         {
             if (t.IsFaulted && t.Exception != null)
             {
-                _logger.LogError(t.Exception.GetBaseException(), "Unhandled exception in metadata extraction for item {ItemId}", item.Id);
+                _logger.LogError(t.Exception.GetBaseException(), "Unhandled exception in metadata extraction for item {ItemId}", itemId);
             }
         }, TaskScheduler.Default);
 

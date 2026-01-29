@@ -74,10 +74,13 @@ public class DownloadService : IDownloadService
                 startInfo.ArgumentList.Add("best[ext=mp4]/best");
             }
 
-            // Add any additional user-specified arguments (split on spaces for safety)
+            // Add any additional user-specified arguments
+            // Note: Arguments with spaces should be added as separate entries in config
+            // Example in appsettings.json: "AdditionalArguments": "--merge-output-format mp4 --no-check-certificate"
             if (!string.IsNullOrEmpty(_videoOptions.AdditionalArguments))
             {
-                var additionalArgs = _videoOptions.AdditionalArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                // Simple space-based splitting - for complex arguments, configure them separately
+                var additionalArgs = _videoOptions.AdditionalArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 foreach (var arg in additionalArgs)
                 {
                     startInfo.ArgumentList.Add(arg);
