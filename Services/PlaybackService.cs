@@ -58,8 +58,10 @@ public class PlaybackService : IPlaybackService, IDisposable
             // Fullscreen if enabled
             if (_playbackOptions.EnableFullscreen)
             {
+                _logger.LogInformation("option --fullscreen added");
                 options.Add("--fullscreen");
-                options.Add("--video-on-top"); // Keep video on top
+                // options.Add("--video-on-top"); // Keep video on top
+                options.Add("--no-video-deco"); // Remove window decorations for true fullscreen
             }
 
             // Disable video output if in development/testing
@@ -150,6 +152,17 @@ public class PlaybackService : IPlaybackService, IDisposable
             if (_mediaPlayer.IsPlaying)
             {
                 _logger.LogInformation("Video playback started successfully after {Elapsed}ms", elapsed);
+
+                // Set fullscreen if enabled (must be done after playback starts)
+                if (_playbackOptions.EnableFullscreen)
+                {
+                    // Give VLC additional time to create the video window
+                    // The window handle must be ready before fullscreen can be set
+                    await Task.Delay(300);
+                    
+                    _mediaPlayer.Fullscreen = true;
+                    _logger.LogInformation("Fullscreen enabled for video playback");
+                }
             }
             else
             {
