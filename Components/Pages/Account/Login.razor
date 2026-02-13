@@ -90,7 +90,19 @@
 
         if (result.Succeeded)
         {
-            NavigationManager.NavigateTo("/", forceLoad: true);
+            // NavigationManager.NavigateTo("/", forceLoad: true);            
+            if (result.Succeeded)
+            {
+                try
+                {
+                    NavigationManager.NavigateTo("/");
+                }
+                catch (NavigationException ex)
+                {
+                    errorMessage = "Navigation failed. Please try again.";
+                    // Optionally log ex
+                }
+            }
         }
         else
         {
