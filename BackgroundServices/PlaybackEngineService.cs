@@ -213,6 +213,17 @@ public class PlaybackEngineService : BackgroundService
                 return;
             }
 
+            // Check for duplicate media ended events
+            lock (_mediaEndedLock)
+            {
+                if (_mediaEndedHandledForVideoId == _currentVideo.Id)
+                {
+                    _logger.LogDebug("Ignoring duplicate {Reason} event for video {VideoId}", reason, _currentVideo.Id);
+                    return;
+                }
+                _mediaEndedHandledForVideoId = _currentVideo.Id;
+            }
+
             var finished = _currentVideo;
 
             _logger.LogInformation("Finalizing current video {VideoId} ({Reason})", finished.Id, reason);

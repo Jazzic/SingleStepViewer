@@ -26,12 +26,16 @@ public class VideoService : IVideoService
             var startInfo = new ProcessStartInfo
             {
                 FileName = _videoOptions.YtDlpPath,
-                Arguments = $"--dump-json --no-playlist \"{videoUrl}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // Use ArgumentList to prevent command injection
+            startInfo.ArgumentList.Add("--dump-json");
+            startInfo.ArgumentList.Add("--no-playlist");
+            startInfo.ArgumentList.Add(videoUrl);
 
             using var process = new Process { StartInfo = startInfo };
             process.Start();

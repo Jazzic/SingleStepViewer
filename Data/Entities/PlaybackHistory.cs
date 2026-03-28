@@ -25,4 +25,7 @@ public class PlaybackHistory
 
     [MaxLength(1000)]
     public string? ErrorMessage { get; set; }
+
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
 }

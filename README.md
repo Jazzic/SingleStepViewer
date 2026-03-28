@@ -151,6 +151,36 @@ Adjust weights to change the balance between priority and fairness.
 
 **Note:** The format `bestvideo+bestaudio` downloads the highest quality video and audio streams separately, then merges them using ffmpeg. This enables 1080p, 1440p, and 4K downloads. The `--js-runtimes node` flag allows yt-dlp to use Node.js for better YouTube extraction.
 
+## Security
+
+⚠️ **IMPORTANT SECURITY NOTICE**
+
+This application has undergone security improvements, but requires proper configuration for production use:
+
+1. **Change Default Admin Password**: The default password `Admin123!` MUST be changed for production deployments
+2. **Review SECURITY.md**: See [SECURITY.md](SECURITY.md) for detailed security documentation
+3. **Use Secure Configuration**: Never commit production credentials to source control
+
+### Key Security Fixes (January 2026)
+
+- ✅ **Command Injection Prevention**: Fixed vulnerabilities in yt-dlp process invocation
+- ✅ **Path Traversal Prevention**: Sanitized user-controlled filenames
+- ✅ **Configuration-Based Credentials**: Moved admin credentials to configuration
+- ✅ **Startup Validation**: Added checks for required dependencies
+- ✅ **Improved Error Handling**: Better exception handling in background tasks
+- ✅ **Concurrency Control**: Added row versioning to prevent race conditions
+
+### Production Deployment Recommendations
+
+```bash
+# Use environment variables for sensitive data
+export AdminUser__Password="YourSecurePassword123!"
+export ConnectionStrings__DefaultConnection="Data Source=/secure/path/db.sqlite"
+dotnet run
+```
+
+See [SECURITY.md](SECURITY.md) for complete security best practices and deployment guidelines.
+
 ## Architecture
 
 ### Technology Stack
